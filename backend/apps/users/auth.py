@@ -10,6 +10,7 @@ from ninja_jwt.exceptions import AuthenticationFailed
 
 from apps.users.models import User
 from apps.users.services import is_token_blacklisted
+from config.settings.base import settings as app_settings
 
 
 def get_user_from_token(
@@ -30,10 +31,11 @@ def get_user_from_token(
     """
     try:
         signing_key = settings.NINJA_JWT["SIGNING_KEY"]
+        algorithm = app_settings.JWT_ALGORITHM
         payload = jwt.decode(
             token,
             str(signing_key),
-            algorithms=["HS256"],
+            algorithms=[algorithm],
             options={"verify_exp": True},
         )
     except jwt.PyJWTError:
@@ -68,11 +70,12 @@ class JWTAuth(BaseJWTAuth):
         """Authenticate request with blacklist check."""
         try:
             signing_key = settings.NINJA_JWT["SIGNING_KEY"]
+            algorithm = app_settings.JWT_ALGORITHM
             payload = jwt.decode(
                 token,
                 str(signing_key),
-                algorithms=["HS256"],
-                options={"verify_exp": False},
+                algorithms=[algorithm],
+                options={"verify_exp": True},
             )
         except jwt.PyJWTError:
             return super().authenticate(request, token)

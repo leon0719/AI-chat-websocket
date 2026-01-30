@@ -4,7 +4,7 @@ from datetime import datetime
 from uuid import UUID
 
 from ninja import Schema
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from apps.chat.models import SUPPORTED_MODELS
 
@@ -44,6 +44,15 @@ class ConversationUpdateSchema(Schema):
         if v is not None and v not in SUPPORTED_MODELS:
             raise ValueError(f"Unsupported model. Choose from: {SUPPORTED_MODELS}")
         return v
+
+    @model_validator(mode="after")
+    def validate_at_least_one_field(self) -> "ConversationUpdateSchema":
+        if all(
+            getattr(self, field) is None
+            for field in ["title", "model", "system_prompt", "temperature", "is_archived"]
+        ):
+            raise ValueError("At least one field must be provided for update")
+        return self
 
 
 class ConversationSchema(Schema):
