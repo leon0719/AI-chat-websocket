@@ -12,10 +12,11 @@ from apps.chat.models import SUPPORTED_MODELS
 class ConversationCreateSchema(Schema):
     """Schema for creating a conversation."""
 
-    title: str = Field("", max_length=255)
+    title: str = Field("New Conversation", min_length=1, max_length=255)
     model: str = "gpt-4o"
     system_prompt: str = Field(
         "You are a helpful assistant. Always respond in Traditional Chinese (繁體中文).",
+        min_length=1,
         max_length=10000,
     )
     temperature: float = Field(0.7, ge=0.0, le=2.0)
@@ -31,9 +32,9 @@ class ConversationCreateSchema(Schema):
 class ConversationUpdateSchema(Schema):
     """Schema for updating a conversation."""
 
-    title: str | None = Field(None, max_length=255)
+    title: str | None = Field(None, min_length=1, max_length=255)
     model: str | None = None
-    system_prompt: str | None = Field(None, max_length=10000)
+    system_prompt: str | None = Field(None, min_length=1, max_length=10000)
     temperature: float | None = Field(None, ge=0.0, le=2.0)
     is_archived: bool | None = None
 

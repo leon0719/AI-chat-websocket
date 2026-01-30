@@ -11,7 +11,7 @@ class UserRegisterSchema(Schema):
 
     email: EmailStr
     username: str = Field(min_length=3, max_length=50, pattern=r"^[a-zA-Z0-9_-]+$")
-    password: str = Field(min_length=8, max_length=128)
+    password: str = Field(min_length=12, max_length=128)
 
 
 class UserSchema(Schema):
@@ -27,3 +27,15 @@ class ErrorSchema(Schema):
 
     error: str
     code: str
+
+
+class LogoutSchema(Schema):
+    """Schema for logout request."""
+
+    refresh_token: str | None = None
+
+
+class LogoutResponseSchema(Schema):
+    """Schema for logout response."""
+
+    message: str

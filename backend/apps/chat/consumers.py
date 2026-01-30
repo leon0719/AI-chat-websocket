@@ -1,6 +1,7 @@
 """WebSocket consumers for chat."""
 
 import asyncio
+from enum import StrEnum
 from uuid import UUID
 
 import bleach
@@ -23,11 +24,36 @@ from apps.core.log_config import logger
 from apps.core.ratelimit import check_ws_rate_limit
 
 MAX_MESSAGE_LENGTH = 10000
-AI_STREAM_TIMEOUT = 120  # seconds
-HEARTBEAT_INTERVAL = 30  # seconds
-TASK_CANCEL_TIMEOUT = 5  # seconds
-WS_MESSAGE_RATE_LIMIT = 20  # messages per minute
-WS_RATE_LIMIT_WINDOW = 60  # seconds
+AI_STREAM_TIMEOUT = 120
+HEARTBEAT_INTERVAL = 30
+TASK_CANCEL_TIMEOUT = 5
+WS_MESSAGE_RATE_LIMIT = 20
+WS_RATE_LIMIT_WINDOW = 60
+
+
+class WSMessageType(StrEnum):
+    """WebSocket message types."""
+
+    CHAT_MESSAGE = "chat.message"
+    CHAT_STREAM = "chat.stream"
+    CHAT_ERROR = "chat.error"
+    PING = "ping"
+    PONG = "pong"
+
+
+class WSErrorCode(StrEnum):
+    """WebSocket error codes."""
+
+    INVALID_JSON = "INVALID_JSON"
+    UNKNOWN_TYPE = "UNKNOWN_TYPE"
+    NO_CONVERSATION = "NO_CONVERSATION"
+    RATE_LIMIT_EXCEEDED = "RATE_LIMIT_EXCEEDED"
+    ALREADY_PROCESSING = "ALREADY_PROCESSING"
+    INTERNAL_ERROR = "INTERNAL_ERROR"
+    EMPTY_CONTENT = "EMPTY_CONTENT"
+    MESSAGE_TOO_LONG = "MESSAGE_TOO_LONG"
+    AI_TIMEOUT = "AI_TIMEOUT"
+    AI_ERROR = "AI_ERROR"
 
 
 class ChatConsumer(AsyncWebsocketConsumer):
@@ -70,7 +96,6 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
     async def disconnect(self, close_code):
         """Handle WebSocket disconnection."""
-        # 取消心跳任務（帶超時保護）
         if self._heartbeat_task:
             self._heartbeat_task.cancel()
             try:
@@ -79,7 +104,6 @@ class ChatConsumer(AsyncWebsocketConsumer):
             except (asyncio.CancelledError, TimeoutError):
                 pass
 
-        # 取消摘要任務（帶超時保護）
         if self._summary_task and not self._summary_task.done():
             self._summary_task.cancel()
             try:
@@ -97,7 +121,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
         try:
             while True:
                 await asyncio.sleep(HEARTBEAT_INTERVAL)
-                await self.send(text_data=orjson.dumps({"type": "ping"}).decode())
+                await self.send(text_data=orjson.dumps({"type": WSMessageType.PING}).decode())
         except asyncio.CancelledError:
             pass
         except Exception as e:
@@ -108,25 +132,24 @@ class ChatConsumer(AsyncWebsocketConsumer):
         try:
             data = orjson.loads(text_data)
         except (ValueError, TypeError, orjson.JSONDecodeError):
-            await self._send_error("Invalid JSON", "INVALID_JSON")
+            await self._send_error("Invalid JSON", WSErrorCode.INVALID_JSON)
             return
 
         msg_type = data.get("type")
 
-        if msg_type == "chat.message":
+        if msg_type == WSMessageType.CHAT_MESSAGE:
             await self._handle_chat_message(data)
-        elif msg_type == "pong":
-            pass  # Client heartbeat response, no action needed
+        elif msg_type == WSMessageType.PONG:
+            pass
         else:
-            await self._send_error(f"Unknown message type: {msg_type}", "UNKNOWN_TYPE")
+            await self._send_error(f"Unknown message type: {msg_type}", WSErrorCode.UNKNOWN_TYPE)
 
     async def _handle_chat_message(self, data: dict):
         """Handle incoming chat message and stream AI response."""
         if self.conversation is None or self.conversation_id is None:
-            await self._send_error("No active conversation", "NO_CONVERSATION")
+            await self._send_error("No active conversation", WSErrorCode.NO_CONVERSATION)
             return
 
-        # Check rate limit
         user = self.scope.get("user")
         if user:
             is_allowed, retry_after = check_ws_rate_limit(
@@ -138,50 +161,27 @@ class ChatConsumer(AsyncWebsocketConsumer):
             if not is_allowed:
                 await self._send_error(
                     f"Rate limit exceeded. Try again in {retry_after} seconds.",
-                    "RATE_LIMIT_EXCEEDED",
+                    WSErrorCode.RATE_LIMIT_EXCEEDED,
                 )
                 return
 
-        # Check if already processing - in asyncio single-threaded context,
-        # the check and acquire are atomic as long as there's no await between them
         if self._processing_lock.locked():
-            await self._send_error("Already processing a message", "ALREADY_PROCESSING")
+            await self._send_error("Already processing a message", WSErrorCode.ALREADY_PROCESSING)
             return
 
         async with self._processing_lock:
             await self._process_chat_message(data)
 
     async def _process_chat_message(self, data: dict):
-        """Process the chat message within the lock context.
-
-        Called only from _handle_chat_message which validates conversation existence.
-        """
-        # Defensive check - should never happen as _handle_chat_message validates these
+        """Process the chat message within the lock context."""
         if self.conversation is None or self.conversation_id is None:
             logger.error("_process_chat_message called without valid conversation state")
-            await self._send_error("Invalid conversation state", "INTERNAL_ERROR")
+            await self._send_error("Invalid conversation state", WSErrorCode.INTERNAL_ERROR)
             return
 
         try:
-            raw_content = data.get("content", "").strip()
-
-            if not raw_content:
-                await self._send_error("Message content is required", "EMPTY_CONTENT")
-                return
-
-            if len(raw_content) > MAX_MESSAGE_LENGTH:
-                await self._send_error(
-                    f"Message exceeds maximum length of {MAX_MESSAGE_LENGTH}", "MESSAGE_TOO_LONG"
-                )
-                return
-
-            # 清理輸入內容，移除潛在的 XSS 攻擊向量
-            content = bleach.clean(raw_content, tags=[], strip=True)
-
-            if len(content) > MAX_MESSAGE_LENGTH:
-                await self._send_error(
-                    f"Message exceeds maximum length of {MAX_MESSAGE_LENGTH}", "MESSAGE_TOO_LONG"
-                )
+            content = await self._validate_message_content(data)
+            if content is None:
                 return
 
             await self._save_message(
@@ -190,7 +190,6 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 content=content,
             )
 
-            # 獲取歷史記錄（含 token 計數）
             history, total_tokens = await self._get_history_with_token_limit(
                 self.conversation_id,
                 self.conversation.model,
@@ -198,78 +197,132 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 self.conversation.summary,
             )
 
-            # 組裝訊息
-            messages = [{"role": "system", "content": self.conversation.system_prompt}]
+            messages = self._build_chat_messages(history)
+            full_response, usage = await self._stream_ai_response(messages)
 
-            # 如果有摘要，加入 system message
-            if self.conversation.summary:
-                messages.append(
-                    {
-                        "role": "system",
-                        "content": f"對話摘要：{self.conversation.summary}",
-                    }
-                )
-
-            messages.extend(history)
-
-            full_response = ""
-            prompt_tokens = 0
-            completion_tokens = 0
-
-            async with asyncio.timeout(AI_STREAM_TIMEOUT):
-                async for chunk in self.ai_client.stream_chat(
-                    messages=messages,
-                    model=self.conversation.model,
-                    temperature=self.conversation.temperature,
-                ):
-                    if chunk.get("type") == "content":
-                        content_delta = chunk.get("content", "")
-                        full_response += content_delta
-                        await self._send_stream(content_delta, done=False)
-                    elif chunk.get("type") == "usage":
-                        prompt_tokens = chunk.get("prompt_tokens", 0)
-                        completion_tokens = chunk.get("completion_tokens", 0)
-
-            assistant_message = await self._save_message(
-                conversation_id=self.conversation_id,
-                role=MessageRole.ASSISTANT,
-                content=full_response,
-                prompt_tokens=prompt_tokens,
-                completion_tokens=completion_tokens,
-                model_used=self.conversation.model,
-            )
-
-            await self._send_stream("", done=True, message_id=str(assistant_message.id))
-
-            # 使用 API 返回的 completion_tokens 計算更新後的總 token 數
-            # 避免重複呼叫 count_messages_tokens
-            updated_total_tokens = total_tokens + completion_tokens
-
-            # 檢查是否需要生成摘要（token > 70%）- 背景執行不阻塞回應
-            if should_summarize(updated_total_tokens, self.conversation.model):
-                # 包含最新的 AI 回應在摘要中
-                history_with_response = [
-                    *history,
-                    {"role": "assistant", "content": full_response},
-                ]
-                self._summary_task = asyncio.create_task(
-                    self._generate_summary(history_with_response, updated_total_tokens)
-                )
+            await self._save_and_finalize_response(full_response, usage, history, total_tokens)
 
         except TimeoutError:
             logger.error(f"AI stream timeout after {AI_STREAM_TIMEOUT}s")
-            await self._send_error("AI response timed out", "AI_TIMEOUT")
+            await self._send_error("AI response timed out", WSErrorCode.AI_TIMEOUT)
         except AIServiceError as e:
             logger.error(f"AI service error: {e}")
-            await self._send_error(str(e), "AI_ERROR")
+            await self._send_error(str(e), WSErrorCode.AI_ERROR)
         except Exception as e:
             logger.exception(f"Unexpected error during chat: {e}")
-            await self._send_error("An unexpected error occurred", "INTERNAL_ERROR")
+            await self._send_error("An unexpected error occurred", WSErrorCode.INTERNAL_ERROR)
+
+    async def _validate_message_content(self, data: dict) -> str | None:
+        """Validate and sanitize message content. Returns None if invalid."""
+        raw_content = data.get("content", "").strip()
+
+        if not raw_content:
+            await self._send_error("Message content is required", WSErrorCode.EMPTY_CONTENT)
+            return None
+
+        if len(raw_content) > MAX_MESSAGE_LENGTH:
+            await self._send_error(
+                f"Message exceeds maximum length of {MAX_MESSAGE_LENGTH}",
+                WSErrorCode.MESSAGE_TOO_LONG,
+            )
+            return None
+
+        content = bleach.clean(raw_content, tags=[], strip=True)
+
+        if len(content) > MAX_MESSAGE_LENGTH:
+            await self._send_error(
+                f"Message exceeds maximum length of {MAX_MESSAGE_LENGTH}",
+                WSErrorCode.MESSAGE_TOO_LONG,
+            )
+            return None
+
+        return content
+
+    def _build_chat_messages(self, history: list[dict]) -> list[dict]:
+        """Build the message list for AI API call.
+
+        Note: This is only called from _process_chat_message after conversation validation.
+        """
+        if self.conversation is None:
+            raise RuntimeError("Conversation required for building messages")
+        messages = [{"role": "system", "content": self.conversation.system_prompt}]
+
+        if self.conversation.summary:
+            messages.append(
+                {
+                    "role": "system",
+                    "content": f"對話摘要：{self.conversation.summary}",
+                }
+            )
+
+        messages.extend(history)
+        return messages
+
+    async def _stream_ai_response(self, messages: list[dict]) -> tuple[str, dict]:
+        """Stream AI response and return full response with usage stats.
+
+        Note: This is only called from _process_chat_message after conversation validation.
+        """
+        if self.conversation is None:
+            raise RuntimeError("Conversation required for streaming AI response")
+        full_response = ""
+        usage = {"prompt_tokens": 0, "completion_tokens": 0}
+
+        async with asyncio.timeout(AI_STREAM_TIMEOUT):
+            async for chunk in self.ai_client.stream_chat(
+                messages=messages,
+                model=self.conversation.model,
+                temperature=self.conversation.temperature,
+            ):
+                if chunk.get("type") == "content":
+                    content_delta = chunk.get("content", "")
+                    full_response += content_delta
+                    await self._send_stream(content_delta, done=False)
+                elif chunk.get("type") == "usage":
+                    usage["prompt_tokens"] = chunk.get("prompt_tokens", 0)
+                    usage["completion_tokens"] = chunk.get("completion_tokens", 0)
+
+        return full_response, usage
+
+    async def _save_and_finalize_response(
+        self,
+        full_response: str,
+        usage: dict,
+        history: list[dict],
+        total_tokens: int,
+    ) -> None:
+        """Save assistant message and trigger summary if needed.
+
+        Note: This is only called from _process_chat_message after conversation validation.
+        """
+        if self.conversation is None or self.conversation_id is None:
+            raise RuntimeError("Conversation required for saving response")
+        assistant_message = await self._save_message(
+            conversation_id=self.conversation_id,
+            role=MessageRole.ASSISTANT,
+            content=full_response,
+            prompt_tokens=usage["prompt_tokens"],
+            completion_tokens=usage["completion_tokens"],
+            model_used=self.conversation.model,
+        )
+
+        await self._send_stream("", done=True, message_id=str(assistant_message.id))
+
+        updated_total_tokens = total_tokens + usage["completion_tokens"]
+
+        if should_summarize(updated_total_tokens, self.conversation.model):
+            history_with_response = [
+                *history,
+                {"role": "assistant", "content": full_response},
+            ]
+            self._summary_task = asyncio.create_task(
+                self._generate_summary(history_with_response, updated_total_tokens)
+            )
 
     async def _send_stream(self, content: str, done: bool, message_id: str | None = None):
         """Send streaming response chunk."""
-        payload = {
-            "type": "chat.stream",
+        payload: dict = {
+            "type": WSMessageType.CHAT_STREAM,
             "content": content,
             "done": done,
         }
@@ -278,12 +331,12 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
         await self.send(text_data=orjson.dumps(payload).decode())
 
-    async def _send_error(self, error: str, code: str):
+    async def _send_error(self, error: str, code: WSErrorCode):
         """Send error message."""
         await self.send(
             text_data=orjson.dumps(
                 {
-                    "type": "chat.error",
+                    "type": WSMessageType.CHAT_ERROR,
                     "error": error,
                     "code": code,
                 }
@@ -358,7 +411,6 @@ class ChatConsumer(AsyncWebsocketConsumer):
             summary = response.get("content", "")
             if summary:
                 await self._update_summary(self.conversation, summary, token_count)
-                # 更新本地實例的摘要
                 self.conversation.summary = summary
                 self.conversation.summary_token_count = token_count
                 logger.info(

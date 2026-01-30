@@ -4,8 +4,8 @@ from config.settings.base import *  # noqa: F403
 
 DEBUG = True
 
-# Allow all hosts in development
-ALLOWED_HOSTS = ["*"]
+# Restrict to specific development hosts
+ALLOWED_HOSTS = ["localhost", "127.0.0.1", "0.0.0.0", "host.docker.internal"]
 
 # CORS - Restrict to specific development origins
 CORS_ALLOW_ALL_ORIGINS = False

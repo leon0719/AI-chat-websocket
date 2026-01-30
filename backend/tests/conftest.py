@@ -15,13 +15,19 @@ os.environ["NINJA_SKIP_REGISTRY"] = "true"
 User = get_user_model()
 
 
+@pytest.fixture(autouse=True)
+def disable_ratelimit_fail_closed(settings):
+    """Disable fail-closed rate limiting in tests to allow testing without Redis."""
+    settings.RATELIMIT_FAIL_CLOSED = False
+
+
 @pytest.fixture
 def user(db):
     """Create a test user."""
     return User.objects.create_user(
         email="test@example.com",
         username="testuser",
-        password="testpass123",
+        password="testpassword123",  # 12+ chars required
     )
 
 

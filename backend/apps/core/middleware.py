@@ -15,13 +15,9 @@ class RequestContextMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        # Get or generate request ID
         request_id = request.headers.get("X-Request-ID", str(uuid.uuid4())[:8])
-
-        # Set context variables and keep tokens for reset
         request_id_token = request_id_var.set(request_id)
 
-        # Set user ID if authenticated (after AuthenticationMiddleware)
         if hasattr(request, "user") and request.user.is_authenticated:
             user_id_token = user_id_var.set(str(request.user.id))
         else:
@@ -29,11 +25,10 @@ class RequestContextMiddleware:
 
         try:
             response = self.get_response(request)
-            # Add request ID to response headers
             response["X-Request-ID"] = request_id
             return response
         finally:
-            # Reset context variables to prevent leakage in async environments
+            # Prevent context leakage in async environments
             request_id_var.reset(request_id_token)
             user_id_var.reset(user_id_token)
 

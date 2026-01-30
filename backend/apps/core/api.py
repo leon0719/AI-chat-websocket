@@ -16,7 +16,6 @@ def health_check(request):
         "redis": "ok",
     }
 
-    # Check database connection
     try:
         with connection.cursor() as cursor:
             cursor.execute("SELECT 1")
@@ -24,7 +23,6 @@ def health_check(request):
         health["database"] = "error"
         health["status"] = "unhealthy"
 
-    # Check Redis connection
     try:
         cache.set("health_check", "ok", 1)
         cache.get("health_check")

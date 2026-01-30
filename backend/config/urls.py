@@ -3,6 +3,8 @@
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
+from django.db import DatabaseError
+from django.http import HttpRequest
 from django.urls import path
 from ninja.throttling import AnonRateThrottle, AuthRateThrottle
 from ninja_extra import NinjaExtraAPI
@@ -10,6 +12,8 @@ from ninja_jwt.controller import NinjaJWTDefaultController
 
 from apps.chat.api import router as chat_router
 from apps.core.api import router as core_router
+from apps.core.exceptions import NotFoundError, ValidationError
+from apps.core.log_config import logger
 from apps.users.api import router as users_router
 
 api = NinjaExtraAPI(
@@ -22,6 +26,28 @@ api = NinjaExtraAPI(
         AuthRateThrottle("120/m"),  # Authenticated: 120 requests/minute
     ],
 )
+
+
+@api.exception_handler(NotFoundError)
+def handle_not_found(request: HttpRequest, exc: NotFoundError):
+    """Handle NotFoundError globally."""
+    return api.create_response(request, {"error": exc.message, "code": exc.code}, status=404)
+
+
+@api.exception_handler(ValidationError)
+def handle_validation_error(request: HttpRequest, exc: ValidationError):
+    """Handle ValidationError globally."""
+    return api.create_response(request, {"error": exc.message, "code": exc.code}, status=400)
+
+
+@api.exception_handler(DatabaseError)
+def handle_database_error(request: HttpRequest, exc: DatabaseError):
+    """Handle DatabaseError globally."""
+    logger.exception(f"Database error: {exc}")
+    return api.create_response(
+        request, {"error": "Database error occurred", "code": "DATABASE_ERROR"}, status=500
+    )
+
 
 # Register JWT controller (provides /token/pair, /token/refresh, /token/verify)
 api.register_controllers(NinjaJWTDefaultController)

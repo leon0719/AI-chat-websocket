@@ -52,6 +52,8 @@ class Conversation(models.Model):
     class Meta:
         db_table = "conversations"
         ordering = ["-updated_at"]
+        verbose_name = "conversation"
+        verbose_name_plural = "conversations"
         indexes = [
             models.Index(fields=["user", "-updated_at"], name="conv_user_updated_idx"),
             models.Index(fields=["user", "is_archived"], name="conv_user_archived_idx"),
@@ -84,10 +86,13 @@ class Message(models.Model):
     )
     model_used = models.CharField(max_length=50, blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         db_table = "messages"
         ordering = ["created_at"]
+        verbose_name = "message"
+        verbose_name_plural = "messages"
         indexes = [
             models.Index(fields=["conversation", "created_at"], name="msg_conv_created_idx"),
             models.Index(fields=["conversation", "-created_at"], name="msg_conv_created_desc_idx"),

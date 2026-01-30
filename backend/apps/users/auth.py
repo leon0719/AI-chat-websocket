@@ -1,11 +1,15 @@
-"""JWT authentication utilities for WebSocket connections."""
+"""JWT authentication utilities for WebSocket and REST API."""
 
-from typing import Literal
+from typing import Any, Literal
 
 import jwt
 from django.conf import settings
+from django.http import HttpRequest
+from ninja_jwt.authentication import JWTAuth as BaseJWTAuth
+from ninja_jwt.exceptions import AuthenticationFailed
 
 from apps.users.models import User
+from apps.users.services import is_token_blacklisted
 
 
 def get_user_from_token(
@@ -35,9 +39,12 @@ def get_user_from_token(
     except jwt.PyJWTError:
         return None
 
-    # Check token type
     actual_token_type = payload.get("token_type")
     if actual_token_type != token_type:
+        return None
+
+    jti = payload.get("jti")
+    if jti and is_token_blacklisted(jti):
         return None
 
     user_id = payload.get("user_id")
@@ -48,3 +55,30 @@ def get_user_from_token(
         return User.objects.get(id=user_id)
     except User.DoesNotExist:
         return None
+
+
+class JWTAuth(BaseJWTAuth):
+    """Custom JWT authentication with blacklist support.
+
+    Extends ninja_jwt's JWTAuth to check if tokens have been blacklisted
+    (e.g., after logout).
+    """
+
+    def authenticate(self, request: HttpRequest, token: str) -> Any:
+        """Authenticate request with blacklist check."""
+        try:
+            signing_key = settings.NINJA_JWT["SIGNING_KEY"]
+            payload = jwt.decode(
+                token,
+                str(signing_key),
+                algorithms=["HS256"],
+                options={"verify_exp": False},
+            )
+        except jwt.PyJWTError:
+            return super().authenticate(request, token)
+
+        jti = payload.get("jti")
+        if jti and is_token_blacklisted(jti):
+            raise AuthenticationFailed("Token has been revoked")
+
+        return super().authenticate(request, token)

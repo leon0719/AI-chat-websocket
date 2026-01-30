@@ -2,6 +2,7 @@
 
 import logging
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from functools import lru_cache
 from typing import Any
 
@@ -27,6 +28,22 @@ RETRYABLE_EXCEPTIONS = (
     APITimeoutError,
     RateLimitError,
 )
+
+
+@asynccontextmanager
+async def handle_openai_errors():
+    """Async context manager for unified OpenAI error handling."""
+    try:
+        yield
+    except RETRYABLE_EXCEPTIONS as e:
+        logger.error(f"OpenAI API error after retries: {e}")
+        raise AIServiceError(f"OpenAI API temporarily unavailable: {e}") from e
+    except OpenAIError as e:
+        logger.error(f"OpenAI API error: {e}")
+        raise AIServiceError(f"OpenAI API error: {e}") from e
+    except Exception as e:
+        logger.exception(f"Unexpected error calling OpenAI: {e}")
+        raise AIServiceError(f"Unexpected error: {e}") from e
 
 
 class OpenAIClient:
@@ -62,7 +79,7 @@ class OpenAIClient:
         Note: Retry is applied to the initial API call. If streaming fails mid-way,
         the entire request needs to be retried from the consumer level.
         """
-        try:
+        async with handle_openai_errors():
             stream = await self._call_openai(
                 model=model,
                 messages=messages,
@@ -85,16 +102,6 @@ class OpenAIClient:
                         "completion_tokens": chunk.usage.completion_tokens,
                     }
 
-        except RETRYABLE_EXCEPTIONS as e:
-            logger.error(f"OpenAI API error after retries: {e}")
-            raise AIServiceError(f"OpenAI API temporarily unavailable: {e}") from e
-        except OpenAIError as e:
-            logger.error(f"OpenAI API error: {e}")
-            raise AIServiceError(f"OpenAI API error: {e}") from e
-        except Exception as e:
-            logger.exception(f"Unexpected error calling OpenAI: {e}")
-            raise AIServiceError(f"Unexpected error: {e}") from e
-
     async def chat(
         self,
         messages: list[dict[str, Any]],
@@ -111,7 +118,7 @@ class OpenAIClient:
                 "completion_tokens": N,
             }
         """
-        try:
+        async with handle_openai_errors():
             response = await self._call_openai(
                 model=model,
                 messages=messages,
@@ -125,16 +132,6 @@ class OpenAIClient:
                 "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
                 "completion_tokens": response.usage.completion_tokens if response.usage else 0,
             }
-
-        except RETRYABLE_EXCEPTIONS as e:
-            logger.error(f"OpenAI API error after retries: {e}")
-            raise AIServiceError(f"OpenAI API temporarily unavailable: {e}") from e
-        except OpenAIError as e:
-            logger.error(f"OpenAI API error: {e}")
-            raise AIServiceError(f"OpenAI API error: {e}") from e
-        except Exception as e:
-            logger.exception(f"Unexpected error calling OpenAI: {e}")
-            raise AIServiceError(f"Unexpected error: {e}") from e
 
 
 @lru_cache(maxsize=1)

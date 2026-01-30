@@ -2,9 +2,7 @@
 
 from uuid import UUID
 
-from django.db import DatabaseError
 from ninja import Router
-from ninja_jwt.authentication import JWTAuth
 from pydantic import Field
 
 from apps.chat.schemas import (
@@ -22,8 +20,7 @@ from apps.chat.services import (
     get_user_conversations,
     update_conversation,
 )
-from apps.core.exceptions import NotFoundError, ValidationError
-from apps.core.log_config import logger
+from apps.users.auth import JWTAuth
 from apps.users.schemas import ErrorSchema
 
 router = Router(auth=JWTAuth())
@@ -48,53 +45,25 @@ def create_conversation_endpoint(request, payload: ConversationCreateSchema):
 )
 def get_conversation_endpoint(request, conversation_id: UUID):
     """Get a conversation by ID."""
-    try:
-        conversation = get_conversation(conversation_id, request.auth.id)
-        return 200, conversation
-    except NotFoundError as e:
-        return 404, {"error": e.message, "code": e.code}
-    except DatabaseError as e:
-        logger.exception(f"Database error getting conversation {conversation_id}: {e}")
-        return 500, {"error": "Database error occurred", "code": "DATABASE_ERROR"}
-    except Exception as e:
-        logger.exception(f"Unexpected error getting conversation {conversation_id}: {e}")
-        return 500, {"error": "An unexpected error occurred", "code": "INTERNAL_ERROR"}
+    conversation = get_conversation(conversation_id, request.auth.id)
+    return 200, conversation
 
 
 @router.patch(
-    "/{conversation_id}", response={200: ConversationSchema, 404: ErrorSchema, 500: ErrorSchema}
+    "/{conversation_id}",
+    response={200: ConversationSchema, 400: ErrorSchema, 404: ErrorSchema, 500: ErrorSchema},
 )
 def update_conversation_endpoint(request, conversation_id: UUID, payload: ConversationUpdateSchema):
     """Update a conversation."""
-    try:
-        conversation = update_conversation(conversation_id, request.auth.id, payload)
-        return 200, conversation
-    except NotFoundError as e:
-        return 404, {"error": e.message, "code": e.code}
-    except ValidationError as e:
-        return 400, {"error": e.message, "code": e.code}
-    except DatabaseError as e:
-        logger.exception(f"Database error updating conversation {conversation_id}: {e}")
-        return 500, {"error": "Database error occurred", "code": "DATABASE_ERROR"}
-    except Exception as e:
-        logger.exception(f"Unexpected error updating conversation {conversation_id}: {e}")
-        return 500, {"error": "An unexpected error occurred", "code": "INTERNAL_ERROR"}
+    conversation = update_conversation(conversation_id, request.auth.id, payload)
+    return 200, conversation
 
 
 @router.delete("/{conversation_id}", response={204: None, 404: ErrorSchema, 500: ErrorSchema})
 def delete_conversation_endpoint(request, conversation_id: UUID):
     """Delete a conversation."""
-    try:
-        delete_conversation(conversation_id, request.auth.id)
-        return 204, None
-    except NotFoundError as e:
-        return 404, {"error": e.message, "code": e.code}
-    except DatabaseError as e:
-        logger.exception(f"Database error deleting conversation {conversation_id}: {e}")
-        return 500, {"error": "Database error occurred", "code": "DATABASE_ERROR"}
-    except Exception as e:
-        logger.exception(f"Unexpected error deleting conversation {conversation_id}: {e}")
-        return 500, {"error": "An unexpected error occurred", "code": "INTERNAL_ERROR"}
+    delete_conversation(conversation_id, request.auth.id)
+    return 204, None
 
 
 @router.get(
@@ -108,21 +77,10 @@ def list_messages(
     page_size: int = Field(50, ge=1, le=100),
 ):
     """List messages for a conversation."""
-    try:
-        messages, total = get_conversation_messages(
-            conversation_id, request.auth.id, page, page_size
-        )
-        return 200, {
-            "messages": list(messages),
-            "total": total,
-            "page": page,
-            "page_size": page_size,
-        }
-    except NotFoundError as e:
-        return 404, {"error": e.message, "code": e.code}
-    except DatabaseError as e:
-        logger.exception(f"Database error listing messages for {conversation_id}: {e}")
-        return 500, {"error": "Database error occurred", "code": "DATABASE_ERROR"}
-    except Exception as e:
-        logger.exception(f"Unexpected error listing messages for {conversation_id}: {e}")
-        return 500, {"error": "An unexpected error occurred", "code": "INTERNAL_ERROR"}
+    messages, total = get_conversation_messages(conversation_id, request.auth.id, page, page_size)
+    return 200, {
+        "messages": list(messages),
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }

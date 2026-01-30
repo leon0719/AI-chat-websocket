@@ -78,26 +78,20 @@ def get_conversation_messages(
 ):
     """Get messages for a conversation with pagination.
 
-    Optimized query strategy:
-    - Uses a single prefetch query to get messages with count
-    - Validates ownership through conversation join
-    - Total 2 queries: one for count validation, one for paginated results
+    Validates ownership through conversation join (2 queries total).
     """
-    # 建立基礎查詢集，同時透過 conversation 驗證所有權
     qs = Message.objects.filter(
         conversation_id=conversation_id,
         conversation__user_id=user_id,
     )
 
-    # 獲取總數（同時驗證對話存在且屬於用戶）
     total = qs.count()
 
-    # 如果總數為 0，需要區分「沒有訊息」和「對話不存在」
+    # Distinguish "no messages" from "conversation not found"
     if total == 0:
         if not Conversation.objects.filter(id=conversation_id, user_id=user_id).exists():
             raise NotFoundError("Conversation not found")
 
-    # 計算分頁並獲取訊息
     offset = (page - 1) * page_size
     messages = qs[offset : offset + page_size]
 
@@ -148,7 +142,6 @@ def get_conversation_history_with_token_limit(
     if max_tokens is None:
         max_tokens = get_token_limit(model)
 
-    # 計算 system prompt 和 summary 佔用的 token
     reserved_messages = []
     if system_prompt:
         reserved_messages.append({"role": "system", "content": system_prompt})
@@ -158,14 +151,18 @@ def get_conversation_history_with_token_limit(
     reserved_tokens = count_messages_tokens(reserved_messages, model) if reserved_messages else 0
     available_tokens = max_tokens - reserved_tokens
 
-    # 從最新訊息開始，逐條加入
-    messages = Message.objects.filter(conversation_id=conversation_id).order_by("-created_at")
+    # Use .values() to reduce ORM overhead
+    messages = (
+        Message.objects.filter(conversation_id=conversation_id)
+        .order_by("-created_at")
+        .values("role", "content")
+    )
 
     selected_messages: list[dict] = []
     current_tokens = 0
 
     for msg in messages:
-        msg_dict = {"role": msg.role, "content": msg.content}
+        msg_dict = {"role": msg["role"], "content": msg["content"]}
         msg_tokens = count_messages_tokens([msg_dict], model)
 
         if current_tokens + msg_tokens > available_tokens:
