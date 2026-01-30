@@ -12,7 +12,14 @@ from ninja_jwt.controller import NinjaJWTDefaultController
 
 from apps.chat.api import router as chat_router
 from apps.core.api import router as core_router
-from apps.core.exceptions import NotFoundError, ValidationError
+from apps.core.exceptions import (
+    AIServiceError,
+    AppError,
+    AuthenticationError,
+    AuthorizationError,
+    NotFoundError,
+    ValidationError,
+)
 from apps.core.log_config import logger
 from apps.users.api import router as users_router
 
@@ -27,17 +34,28 @@ api = NinjaExtraAPI(
     ],
 )
 
+# Exception code to HTTP status mapping
+_EXCEPTION_STATUS_MAP: dict[type[AppError], int] = {
+    NotFoundError: 404,
+    ValidationError: 400,
+    AuthenticationError: 401,
+    AuthorizationError: 403,
+    AIServiceError: 503,
+}
 
-@api.exception_handler(NotFoundError)
-def handle_not_found(request: HttpRequest, exc: NotFoundError):
-    """Handle NotFoundError globally."""
-    return api.create_response(request, {"error": exc.message, "code": exc.code}, status=404)
+for exc_class, status_code in _EXCEPTION_STATUS_MAP.items():
 
+    def _make_handler(status: int):
+        def handler(request: HttpRequest, exc: AppError):
+            if status >= 500:
+                logger.error(f"{exc.__class__.__name__}: {exc.message}")
+            return api.create_response(
+                request, {"error": exc.message, "code": exc.code}, status=status
+            )
 
-@api.exception_handler(ValidationError)
-def handle_validation_error(request: HttpRequest, exc: ValidationError):
-    """Handle ValidationError globally."""
-    return api.create_response(request, {"error": exc.message, "code": exc.code}, status=400)
+        return handler
+
+    api.exception_handler(exc_class)(_make_handler(status_code))
 
 
 @api.exception_handler(DatabaseError)

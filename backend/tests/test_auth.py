@@ -3,13 +3,7 @@
 import pytest
 from django.core.cache import cache
 
-from apps.users.services import (
-    LOGIN_MAX_ATTEMPTS,
-    blacklist_token,
-    check_login_lockout,
-    is_token_blacklisted,
-    record_login_attempt,
-)
+from apps.users.services import blacklist_token, is_token_blacklisted
 
 
 @pytest.fixture(autouse=True)
@@ -31,7 +25,7 @@ class TestAuthEndpoints:
             json={
                 "email": "new@example.com",
                 "username": "newuser",
-                "password": "newpassword123",  # 12+ chars required
+                "password": "NewPassword123!",  # Meets complexity: upper, lower, digit, special
             },
         )
         assert response.status_code == 201
@@ -46,7 +40,7 @@ class TestAuthEndpoints:
             json={
                 "email": "test@example.com",
                 "username": "another",
-                "password": "password12345",  # 12+ chars required
+                "password": "Password12345!",  # Meets complexity: upper, lower, digit, special
             },
         )
         assert response.status_code == 400
@@ -130,55 +124,34 @@ class TestAuthEndpoints:
             json={
                 "email": "short@example.com",
                 "username": "shortpass",
-                "password": "short123",  # Only 8 chars
+                "password": "Short12!",  # Only 8 chars (meets complexity but too short)
             },
         )
         assert response.status_code == 422  # Validation error
 
+    def test_password_complexity_missing_uppercase(self, api_client):
+        """Test password complexity requires uppercase letter."""
+        response = api_client.post(
+            "/auth/register",
+            json={
+                "email": "weak@example.com",
+                "username": "weakpass",
+                "password": "password1234!",  # Missing uppercase
+            },
+        )
+        assert response.status_code == 422
 
-@pytest.mark.django_db
-class TestLoginLockout:
-    """Test login lockout functionality."""
-
-    def test_lockout_after_max_attempts(self):
-        """Test that account is locked after max failed attempts."""
-        email = "locktest@example.com"
-
-        # Record max failed attempts
-        for _ in range(LOGIN_MAX_ATTEMPTS):
-            record_login_attempt(email, success=False)
-
-        # Check lockout
-        is_locked, retry_after = check_login_lockout(email)
-        assert is_locked is True
-        assert retry_after > 0
-
-    def test_lockout_cleared_on_success(self):
-        """Test that lockout is cleared after successful login."""
-        email = "cleartest@example.com"
-
-        # Record some failed attempts
-        for _ in range(LOGIN_MAX_ATTEMPTS - 1):
-            record_login_attempt(email, success=False)
-
-        # Successful login should clear attempts
-        record_login_attempt(email, success=True)
-
-        # Should not be locked
-        is_locked, _ = check_login_lockout(email)
-        assert is_locked is False
-
-    def test_no_lockout_before_max_attempts(self):
-        """Test that account is not locked before max attempts."""
-        email = "notlocked@example.com"
-
-        # Record fewer than max failed attempts
-        for _ in range(LOGIN_MAX_ATTEMPTS - 1):
-            record_login_attempt(email, success=False)
-
-        # Should not be locked
-        is_locked, _ = check_login_lockout(email)
-        assert is_locked is False
+    def test_password_complexity_missing_special(self, api_client):
+        """Test password complexity requires special character."""
+        response = api_client.post(
+            "/auth/register",
+            json={
+                "email": "weak@example.com",
+                "username": "weakpass",
+                "password": "Password12345",  # Missing special char
+            },
+        )
+        assert response.status_code == 422
 
 
 @pytest.mark.django_db

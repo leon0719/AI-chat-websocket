@@ -15,6 +15,9 @@ dependencies = [
     "daphne>=4.1",
     # Database
     "psycopg[binary]>=3.2",
+    "dj-database-url>=2.2",
+    # Security - brute force protection
+    "django-axes>=6.5",
     # Cache & Message Broker
     "redis>=5.2",
     # AI

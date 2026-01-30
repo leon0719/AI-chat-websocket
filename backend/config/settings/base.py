@@ -4,8 +4,8 @@ import os
 from datetime import timedelta
 from functools import lru_cache
 from pathlib import Path
-from urllib.parse import unquote, urlparse
 
+import dj_database_url
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # 根據 ENV 環境變數決定讀取哪個 .env 檔案
@@ -40,13 +40,15 @@ class Settings(BaseSettings):
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
+    def _parse_comma_separated(self, value: str) -> list[str]:
+        """Parse comma-separated string into list, stripping whitespace."""
+        return [v.strip() for v in value.split(",") if v.strip()]
+
     def get_allowed_hosts(self) -> list[str]:
-        """Get allowed hosts as a list."""
-        return [h.strip() for h in self.ALLOWED_HOSTS.split(",") if h.strip()]
+        return self._parse_comma_separated(self.ALLOWED_HOSTS)
 
     def get_cors_allowed_origins(self) -> list[str]:
-        """Get CORS allowed origins as a list."""
-        return [o.strip() for o in self.CORS_ALLOWED_ORIGINS.split(",") if o.strip()]
+        return self._parse_comma_separated(self.CORS_ALLOWED_ORIGINS)
 
 
 @lru_cache
@@ -78,6 +80,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "ninja_jwt",
     "ninja_extra",
+    "axes",
     # Local apps
     "apps.core",
     "apps.users",
@@ -91,10 +94,16 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "axes.middleware.AxesMiddleware",
     "apps.core.middleware.RequestContextMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
-    "apps.core.middleware.ExceptionMiddleware",
+]
+
+# Authentication backends (Axes for brute force protection)
+AUTHENTICATION_BACKENDS = [
+    "axes.backends.AxesStandaloneBackend",
+    "django.contrib.auth.backends.ModelBackend",
 ]
 
 # CORS
@@ -123,27 +132,13 @@ WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
 # Database
-# Parse DATABASE_URL using urllib.parse for proper handling of special characters
-_db_url = settings.DATABASE_URL
-if _db_url.startswith("postgresql://") or _db_url.startswith("postgres://"):
-    _parsed = urlparse(_db_url)
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.postgresql",
-            "NAME": _parsed.path.lstrip("/"),
-            "USER": unquote(_parsed.username or ""),
-            "PASSWORD": unquote(_parsed.password or ""),
-            "HOST": _parsed.hostname or "localhost",
-            "PORT": str(_parsed.port) if _parsed.port else "5432",
-        }
-    }
-else:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.sqlite3",
-            "NAME": str(BASE_DIR / "db.sqlite3"),
-        }
-    }
+DATABASES = {
+    "default": dj_database_url.config(
+        default=settings.DATABASE_URL,
+        conn_max_age=600,
+        conn_health_checks=True,
+    )
+}
 
 # Channel Layers
 CHANNEL_LAYERS = {
@@ -195,40 +190,6 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 # Default primary key field type
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# Logging
-LOGGING = {
-    "version": 1,
-    "disable_existing_loggers": False,
-    "formatters": {
-        "verbose": {
-            "format": "{levelname} {asctime} {module} {message}",
-            "style": "{",
-        },
-    },
-    "handlers": {
-        "console": {
-            "class": "logging.StreamHandler",
-            "formatter": "verbose",
-        },
-    },
-    "root": {
-        "handlers": ["console"],
-        "level": "INFO",
-    },
-    "loggers": {
-        "django": {
-            "handlers": ["console"],
-            "level": os.getenv("DJANGO_LOG_LEVEL", "INFO"),
-            "propagate": False,
-        },
-        "apps": {
-            "handlers": ["console"],
-            "level": "DEBUG",
-            "propagate": False,
-        },
-    },
-}
-
 # Django Ninja JWT
 NINJA_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(minutes=settings.JWT_ACCESS_TOKEN_EXPIRE_MINUTES),
@@ -237,3 +198,10 @@ NINJA_JWT = {
     "AUTH_HEADER_TYPES": ("Bearer",),
     "USER_AUTHENTICATION_RULE": "ninja_jwt.authentication.default_user_authentication_rule",
 }
+
+# Django Axes - brute force protection
+AXES_FAILURE_LIMIT = 5
+AXES_COOLOFF_TIME = timedelta(minutes=15)
+AXES_LOCKOUT_PARAMETERS = ["username"]
+AXES_HANDLER = "axes.handlers.cache.AxesCacheHandler"
+AXES_CACHE = "default"

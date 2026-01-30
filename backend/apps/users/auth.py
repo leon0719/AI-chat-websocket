@@ -1,21 +1,19 @@
 """JWT authentication utilities for WebSocket and REST API."""
 
-from typing import Any, Literal
+from typing import Any
 
-import jwt
-from django.conf import settings
 from django.http import HttpRequest
 from ninja_jwt.authentication import JWTAuth as BaseJWTAuth
 from ninja_jwt.exceptions import AuthenticationFailed
 
+from apps.users.jwt_utils import TokenType, decode_jwt_token
 from apps.users.models import User
 from apps.users.services import is_token_blacklisted
-from config.settings.base import settings as app_settings
 
 
 def get_user_from_token(
     token: str,
-    token_type: Literal["access", "refresh"] = "access",  # noqa: S107
+    token_type: TokenType = TokenType.ACCESS,
 ) -> User | None:
     """Get user from a JWT token.
 
@@ -24,25 +22,17 @@ def get_user_from_token(
 
     Args:
         token: The JWT token string.
-        token_type: Expected token type ("access" or "refresh"). Defaults to "access".
+        token_type: Expected token type. Defaults to ACCESS.
 
     Returns:
         User if token is valid and of correct type, None otherwise.
     """
-    try:
-        signing_key = settings.NINJA_JWT["SIGNING_KEY"]
-        algorithm = app_settings.JWT_ALGORITHM
-        payload = jwt.decode(
-            token,
-            str(signing_key),
-            algorithms=[algorithm],
-            options={"verify_exp": True},
-        )
-    except jwt.PyJWTError:
+    payload = decode_jwt_token(token, verify_exp=True)
+    if payload is None:
         return None
 
     actual_token_type = payload.get("token_type")
-    if actual_token_type != token_type:
+    if actual_token_type != token_type.value:
         return None
 
     jti = payload.get("jti")
@@ -68,16 +58,8 @@ class JWTAuth(BaseJWTAuth):
 
     def authenticate(self, request: HttpRequest, token: str) -> Any:
         """Authenticate request with blacklist check."""
-        try:
-            signing_key = settings.NINJA_JWT["SIGNING_KEY"]
-            algorithm = app_settings.JWT_ALGORITHM
-            payload = jwt.decode(
-                token,
-                str(signing_key),
-                algorithms=[algorithm],
-                options={"verify_exp": True},
-            )
-        except jwt.PyJWTError:
+        payload = decode_jwt_token(token, verify_exp=True)
+        if payload is None:
             return super().authenticate(request, token)
 
         jti = payload.get("jti")

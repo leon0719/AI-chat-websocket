@@ -2,10 +2,7 @@
 
 import uuid
 
-from django.http import JsonResponse
-
-from apps.core.exceptions import AppError
-from apps.core.log_config import logger, request_id_var, user_id_var
+from apps.core.log_config import request_id_var, user_id_var
 
 
 class RequestContextMiddleware:
@@ -31,38 +28,3 @@ class RequestContextMiddleware:
             # Prevent context leakage in async environments
             request_id_var.reset(request_id_token)
             user_id_var.reset(user_id_token)
-
-
-class ExceptionMiddleware:
-    """Middleware to handle application exceptions."""
-
-    def __init__(self, get_response):
-        self.get_response = get_response
-
-    def __call__(self, request):
-        return self.get_response(request)
-
-    def process_exception(self, request, exception):
-        """Handle exceptions raised during request processing."""
-        if isinstance(exception, AppError):
-            return JsonResponse(
-                {"error": exception.message, "code": exception.code},
-                status=self._get_status_code(exception.code),
-            )
-
-        logger.exception("Unhandled exception")
-        return JsonResponse(
-            {"error": "Internal server error", "code": "INTERNAL_ERROR"},
-            status=500,
-        )
-
-    def _get_status_code(self, code: str) -> int:
-        """Map error codes to HTTP status codes."""
-        status_map = {
-            "AUTH_ERROR": 401,
-            "FORBIDDEN": 403,
-            "NOT_FOUND": 404,
-            "VALIDATION_ERROR": 400,
-            "AI_ERROR": 503,
-        }
-        return status_map.get(code, 500)

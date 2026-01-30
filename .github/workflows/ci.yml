@@ -10,9 +10,13 @@ on:
     paths:
       - "backend/**"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  lint:
-    name: Lint
+  code-quality:
+    name: Code Quality
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -21,10 +25,13 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: "3.12"
 
-      - name: Install uv
-        run: pip install uv
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "backend/uv.lock"
 
       - name: Install dependencies
         working-directory: ./backend
@@ -38,26 +45,7 @@ jobs:
         working-directory: ./backend
         run: uv run ruff check .
 
-  type-check:
-    name: Type Check
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
-      - name: Install uv
-        run: pip install uv
-
-      - name: Install dependencies
-        working-directory: ./backend
-        run: uv sync --frozen --group dev
-
-      - name: Run mypy
+      - name: Type check
         working-directory: ./backend
         run: uv run mypy .
 
@@ -101,10 +89,13 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          python-version: "3.12"
 
-      - name: Install uv
-        run: pip install uv
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+          cache-dependency-glob: "backend/uv.lock"
 
       - name: Install dependencies
         working-directory: ./backend
@@ -124,4 +115,5 @@ jobs:
           file: ./backend/coverage.xml
           flags: backend
           fail_ci_if_error: false
+          # token: ${{ secrets.CODECOV_TOKEN }}
         continue-on-error: true

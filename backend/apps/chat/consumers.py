@@ -11,7 +11,7 @@ from channels.generic.websocket import AsyncWebsocketConsumer
 
 from apps.chat.ai.client import get_openai_client
 from apps.chat.ai.tokenizer import should_summarize
-from apps.chat.models import Conversation, Message, MessageRole
+from apps.chat.models import MAX_USER_MESSAGE_LENGTH, Conversation, Message, MessageRole
 from apps.chat.services import (
     build_summary_messages,
     create_message,
@@ -23,10 +23,14 @@ from apps.core.exceptions import AIServiceError, NotFoundError
 from apps.core.log_config import logger
 from apps.core.ratelimit import check_ws_rate_limit
 
-MAX_MESSAGE_LENGTH = 10000
+# AI streaming timeout - if exceeded, user message is saved but AI response is not
 AI_STREAM_TIMEOUT = 120
+# WebSocket heartbeat interval for connection keep-alive
 HEARTBEAT_INTERVAL = 30
+# Timeout for cancelling background tasks on disconnect (heartbeat, summary generation)
+# Summary tasks may not complete if client disconnects abruptly
 TASK_CANCEL_TIMEOUT = 5
+# Rate limiting: max messages per window
 WS_MESSAGE_RATE_LIMIT = 20
 WS_RATE_LIMIT_WINDOW = 60
 
@@ -96,25 +100,22 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
     async def disconnect(self, close_code):
         """Handle WebSocket disconnection."""
-        if self._heartbeat_task:
-            self._heartbeat_task.cancel()
-            try:
-                async with asyncio.timeout(TASK_CANCEL_TIMEOUT):
-                    await self._heartbeat_task
-            except (asyncio.CancelledError, TimeoutError):
-                pass
-
-        if self._summary_task and not self._summary_task.done():
-            self._summary_task.cancel()
-            try:
-                async with asyncio.timeout(TASK_CANCEL_TIMEOUT):
-                    await self._summary_task
-            except (asyncio.CancelledError, TimeoutError):
-                pass
-
+        await self._cancel_task(self._heartbeat_task)
+        await self._cancel_task(self._summary_task)
         logger.info(
             f"WebSocket disconnected: conversation={self.conversation_id}, code={close_code}"
         )
+
+    async def _cancel_task(self, task: asyncio.Task | None) -> None:
+        """Cancel and cleanup an async task."""
+        if not task or task.done():
+            return
+        task.cancel()
+        try:
+            async with asyncio.timeout(TASK_CANCEL_TIMEOUT):
+                await task
+        except (asyncio.CancelledError, TimeoutError):
+            pass
 
     async def _heartbeat(self):
         """Send periodic heartbeat to detect dead connections."""
@@ -190,12 +191,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 content=content,
             )
 
-            history, total_tokens = await self._get_history_with_token_limit(
-                self.conversation_id,
-                self.conversation.model,
-                self.conversation.system_prompt,
-                self.conversation.summary,
-            )
+            history, total_tokens = await self._get_history_with_token_limit()
 
             messages = self._build_chat_messages(history)
             full_response, usage = await self._stream_ai_response(messages)
@@ -220,18 +216,11 @@ class ChatConsumer(AsyncWebsocketConsumer):
             await self._send_error("Message content is required", WSErrorCode.EMPTY_CONTENT)
             return None
 
-        if len(raw_content) > MAX_MESSAGE_LENGTH:
-            await self._send_error(
-                f"Message exceeds maximum length of {MAX_MESSAGE_LENGTH}",
-                WSErrorCode.MESSAGE_TOO_LONG,
-            )
-            return None
-
         content = bleach.clean(raw_content, tags=[], strip=True)
 
-        if len(content) > MAX_MESSAGE_LENGTH:
+        if len(content) > MAX_USER_MESSAGE_LENGTH:
             await self._send_error(
-                f"Message exceeds maximum length of {MAX_MESSAGE_LENGTH}",
+                f"Message exceeds maximum length of {MAX_USER_MESSAGE_LENGTH}",
                 WSErrorCode.MESSAGE_TOO_LONG,
             )
             return None
@@ -369,19 +358,14 @@ class ChatConsumer(AsyncWebsocketConsumer):
         )
 
     @database_sync_to_async
-    def _get_history_with_token_limit(
-        self,
-        conversation_id: UUID,
-        model: str,
-        system_prompt: str,
-        summary: str,
-    ) -> tuple[list[dict], int]:
+    def _get_history_with_token_limit(self) -> tuple[list[dict], int]:
         """Get conversation history with token limit."""
+        assert self.conversation_id is not None and self.conversation is not None
         return get_conversation_history_with_token_limit(
-            conversation_id=conversation_id,
-            model=model,
-            system_prompt=system_prompt,
-            summary=summary,
+            conversation_id=self.conversation_id,
+            model=self.conversation.model,
+            system_prompt=self.conversation.system_prompt,
+            summary=self.conversation.summary,
         )
 
     @database_sync_to_async

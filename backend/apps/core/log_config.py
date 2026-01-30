@@ -41,7 +41,13 @@ def json_sink(message):
             log_record["exception"] = "".join(
                 traceback.format_exception(exc_type, exc_value, exc_tb)
             )
-    print(json.dumps(log_record, ensure_ascii=False), file=sys.stdout)  # noqa: T201
+    sys.stdout.write(json.dumps(log_record, ensure_ascii=False) + "\n")
+    sys.stdout.flush()
+
+
+def _add_context(record):
+    """Add context variables to log record."""
+    record["extra"]["request_id"] = request_id_var.get()
 
 
 def setup_logging():
@@ -51,14 +57,12 @@ def setup_logging():
     env = os.getenv("ENV", "local")
 
     if env == "prod":
-        # JSON format for production
         logger.add(
             json_sink,
             level="INFO",
             format="{message}",
         )
     else:
-        # Colored format for development
         logger.add(
             sys.stderr,
             format=(
@@ -72,9 +76,7 @@ def setup_logging():
             colorize=True,
         )
 
+    logger.configure(patcher=_add_context)
 
-# Initialize logging on module import
+
 setup_logging()
-
-# Configure default context for request_id
-logger = logger.bind(request_id="-")

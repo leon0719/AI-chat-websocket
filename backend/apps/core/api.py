@@ -4,6 +4,8 @@ from django.core.cache import cache
 from django.db import connection
 from ninja import Router
 
+from apps.core.log_config import logger
+
 router = Router()
 
 
@@ -20,6 +22,7 @@ def health_check(request):
         with connection.cursor() as cursor:
             cursor.execute("SELECT 1")
     except Exception:
+        logger.exception("Database health check failed")
         health["database"] = "error"
         health["status"] = "unhealthy"
 
@@ -27,6 +30,7 @@ def health_check(request):
         cache.set("health_check", "ok", 1)
         cache.get("health_check")
     except Exception:
+        logger.exception("Redis health check failed")
         health["redis"] = "error"
         health["status"] = "unhealthy"
 

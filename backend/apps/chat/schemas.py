@@ -6,7 +6,14 @@ from uuid import UUID
 from ninja import Schema
 from pydantic import Field, field_validator, model_validator
 
-from apps.chat.models import SUPPORTED_MODELS
+from apps.chat.models import MAX_CONTENT_LENGTH, SUPPORTED_MODELS, MessageRole
+
+
+def _validate_supported_model(v: str | None) -> str | None:
+    """Validate model is in SUPPORTED_MODELS list."""
+    if v is not None and v not in SUPPORTED_MODELS:
+        raise ValueError(f"Unsupported model. Choose from: {SUPPORTED_MODELS}")
+    return v
 
 
 class ConversationCreateSchema(Schema):
@@ -24,9 +31,7 @@ class ConversationCreateSchema(Schema):
     @field_validator("model")
     @classmethod
     def validate_model(cls, v: str) -> str:
-        if v not in SUPPORTED_MODELS:
-            raise ValueError(f"Unsupported model. Choose from: {SUPPORTED_MODELS}")
-        return v
+        return _validate_supported_model(v)  # type: ignore[return-value]
 
 
 class ConversationUpdateSchema(Schema):
@@ -41,9 +46,7 @@ class ConversationUpdateSchema(Schema):
     @field_validator("model")
     @classmethod
     def validate_model(cls, v: str | None) -> str | None:
-        if v is not None and v not in SUPPORTED_MODELS:
-            raise ValueError(f"Unsupported model. Choose from: {SUPPORTED_MODELS}")
-        return v
+        return _validate_supported_model(v)
 
     @model_validator(mode="after")
     def validate_at_least_one_field(self) -> "ConversationUpdateSchema":
@@ -59,10 +62,10 @@ class ConversationSchema(Schema):
     """Schema for conversation response."""
 
     id: UUID
-    title: str
-    model: str
-    system_prompt: str
-    temperature: float
+    title: str = Field(max_length=255)
+    model: str = Field(max_length=50)
+    system_prompt: str = Field(max_length=10000)
+    temperature: float = Field(ge=0.0, le=2.0)
     is_archived: bool
     created_at: datetime
     updated_at: datetime
@@ -72,8 +75,8 @@ class ConversationListSchema(Schema):
     """Schema for conversation list response."""
 
     id: UUID
-    title: str
-    model: str
+    title: str = Field(max_length=255)
+    model: str = Field(max_length=50)
     is_archived: bool
     created_at: datetime
     updated_at: datetime
@@ -83,11 +86,11 @@ class MessageSchema(Schema):
     """Schema for message response."""
 
     id: UUID
-    role: str
-    content: str
-    prompt_tokens: int | None
-    completion_tokens: int | None
-    model_used: str
+    role: MessageRole
+    content: str = Field(max_length=MAX_CONTENT_LENGTH)
+    prompt_tokens: int | None = Field(None, ge=0)
+    completion_tokens: int | None = Field(None, ge=0)
+    model_used: str = Field(max_length=50)
     created_at: datetime
 
 
@@ -95,6 +98,6 @@ class PaginatedMessagesSchema(Schema):
     """Schema for paginated messages response."""
 
     messages: list[MessageSchema]
-    total: int
-    page: int
-    page_size: int
+    total: int = Field(ge=0)
+    page: int = Field(ge=1)
+    page_size: int = Field(ge=1, le=100)

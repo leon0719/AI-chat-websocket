@@ -88,7 +88,9 @@ dependencies = [
     { name = "channels" },
     { name = "channels-redis" },
     { name = "daphne" },
+    { name = "dj-database-url" },
     { name = "django" },
+    { name = "django-axes" },
     { name = "django-cors-headers" },
     { name = "django-ninja" },
     { name = "django-ninja-jwt" },
@@ -126,7 +128,9 @@ requires-dist = [
     { name = "channels", specifier = ">=4.2" },
     { name = "channels-redis", specifier = ">=4.2" },
     { name = "daphne", specifier = ">=4.1" },
+    { name = "dj-database-url", specifier = ">=2.2" },
     { name = "django", specifier = ">=5.2" },
+    { name = "django-axes", specifier = ">=6.5" },
     { name = "django-cors-headers", specifier = ">=4.6" },
     { name = "django-ninja", specifier = ">=1.4" },
     { name = "django-ninja-jwt", specifier = ">=5.4.4" },
@@ -559,6 +563,18 @@ wheels = [
 ]
 
 [[package]]
+name = "dj-database-url"
+version = "3.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "django" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/95/c6/88676a7333fb7c668e626b55f8bfc8527dd863973eb1c40412b95d27747d/dj_database_url-3.1.0.tar.gz", hash = "sha256:d80218426b83f9302c8d27d4fccf52de5cf0cab179f0645fb2839f37605d1353", size = 7924, upload-time = "2026-01-04T09:18:32.693Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/68/1b/e84f7472ab0bdacc3fd09556eb4dd40d88246941d465cc103b36a8dabcd8/dj_database_url-3.1.0-py3-none-any.whl", hash = "sha256:155a56fbbecbaaf1348ccd73bf29138b4c9988363ba08261a0f0145e392e638c", size = 8849, upload-time = "2026-01-04T09:18:43.77Z" },
+]
+
+[[package]]
 name = "django"
 version = "6.0.1"
 source = { registry = "https://pypi.org/simple" }
@@ -570,6 +586,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/b5/9b/016f7e55e855ee738a352b05139d4f8b278d0b451bd01ebef07456ef3b0e/django-6.0.1.tar.gz", hash = "sha256:ed76a7af4da21551573b3d9dfc1f53e20dd2e6c7d70a3adc93eedb6338130a5f", size = 11069565, upload-time = "2026-01-06T18:55:53.069Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/95/b5/814ed98bd21235c116fd3436a7ed44d47560329a6d694ec8aac2982dbb93/django-6.0.1-py3-none-any.whl", hash = "sha256:a92a4ff14f664a896f9849009cb8afaca7abe0d6fc53325f3d1895a15253433d", size = 8338791, upload-time = "2026-01-06T18:55:46.175Z" },
+]
+
+[[package]]
+name = "django-axes"
+version = "8.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "asgiref" },
+    { name = "django" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/b5/60/82817a23327f4633e2015bb8e34a133d5fad3903ae384f7d7116759bd3a6/django_axes-8.1.0.tar.gz", hash = "sha256:92cae514b6270d4b76c7afa657d5988c28b7c6ac1ce367c368eea2dd976199e7", size = 253181, upload-time = "2025-12-19T19:44:12.27Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/34/c8/83620d6a281487dcd97cbe28b0a3684702b3c251159a46091e25501de46d/django_axes-8.1.0-py3-none-any.whl", hash = "sha256:50117de17d189497a01d0544a9977b5136764c513085cf15138084de9dd81993", size = 73731, upload-time = "2025-12-19T19:44:04.216Z" },
 ]
 
 [[package]]

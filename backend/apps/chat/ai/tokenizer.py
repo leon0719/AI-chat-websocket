@@ -15,8 +15,11 @@ MODEL_TOKEN_LIMITS: dict[str, int] = {
 DEFAULT_TOKEN_LIMIT = 16000
 SUMMARY_THRESHOLD = 0.7  # 70% 時觸發摘要
 
-# token 計數的額外開銷（每則訊息約 4 tokens）
+# OpenAI Chat API token overhead constants
+# See: https://github.com/openai/openai-cookbook/blob/main/examples/How_to_count_tokens_with_tiktoken.ipynb
+# Every message has ~4 tokens overhead for role/formatting markers (<|start|>, <|end|>, role, etc.)
 TOKENS_PER_MESSAGE = 4
+# If message has a "name" field, it adds 1 extra token
 TOKENS_PER_NAME = 1
 
 

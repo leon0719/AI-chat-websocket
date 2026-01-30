@@ -9,8 +9,11 @@ from django.db import models
 # Supported models
 SUPPORTED_MODELS = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"]
 
-# Max content length (same as MAX_MESSAGE_LENGTH in consumers.py)
-MAX_CONTENT_LENGTH = 100000  # Allow larger storage for AI responses
+# User message content limit (validated before saving)
+MAX_USER_MESSAGE_LENGTH = 10000
+
+# Max content length for AI responses (larger than user input)
+MAX_CONTENT_LENGTH = 100000
 
 
 class MessageRole(models.TextChoices):
@@ -43,8 +46,14 @@ class Conversation(models.Model):
     )
     is_archived = models.BooleanField(default=False)
     # 對話摘要相關欄位
-    summary = models.TextField(blank=True, default="")
-    summary_token_count = models.IntegerField(default=0)
+    summary = models.TextField(
+        blank=True, default="", help_text="AI-generated conversation summary"
+    )
+    summary_token_count = models.IntegerField(
+        default=0,
+        validators=[MinValueValidator(0)],
+        help_text="Token count at time of summary generation",
+    )
     last_summarized_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -84,7 +93,12 @@ class Message(models.Model):
         blank=True,
         validators=[MinValueValidator(0)],
     )
-    model_used = models.CharField(max_length=50, blank=True, default="")
+    model_used = models.CharField(
+        max_length=50,
+        blank=True,
+        default="",
+        help_text="Model used for this message (may differ from conversation default)",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -96,6 +110,7 @@ class Message(models.Model):
         indexes = [
             models.Index(fields=["conversation", "created_at"], name="msg_conv_created_idx"),
             models.Index(fields=["conversation", "-created_at"], name="msg_conv_created_desc_idx"),
+            models.Index(fields=["-created_at"], name="msg_created_desc_idx"),
         ]
 
     def __str__(self) -> str:

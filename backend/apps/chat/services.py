@@ -12,25 +12,21 @@ from apps.chat.schemas import ConversationCreateSchema, ConversationUpdateSchema
 from apps.core.exceptions import NotFoundError
 
 
-def get_user_conversations(user_id: UUID, include_archived: bool = False):
+def get_user_conversations(user_id: UUID, include_archived: bool = False) -> list[Conversation]:
     """Get all conversations for a user.
 
-    Uses select_related to prevent N+1 queries when accessing user data.
     Ordered by updated_at descending (most recent first).
     """
-    qs = Conversation.objects.select_related("user").filter(user_id=user_id)
+    qs = Conversation.objects.filter(user_id=user_id)
     if not include_archived:
         qs = qs.filter(is_archived=False)
-    return qs.order_by("-updated_at")
+    return list(qs.order_by("-updated_at"))
 
 
 def get_conversation(conversation_id: UUID, user_id: UUID) -> Conversation:
-    """Get a conversation by ID.
-
-    Uses select_related to prevent N+1 queries when accessing user data.
-    """
+    """Get a conversation by ID."""
     try:
-        return Conversation.objects.select_related("user").get(id=conversation_id, user_id=user_id)
+        return Conversation.objects.get(id=conversation_id, user_id=user_id)
     except Conversation.DoesNotExist as e:
         raise NotFoundError("Conversation not found") from e
 
@@ -75,25 +71,23 @@ def delete_conversation(conversation_id: UUID, user_id: UUID) -> None:
 
 def get_conversation_messages(
     conversation_id: UUID, user_id: UUID, page: int = 1, page_size: int = 50
-):
+) -> tuple[list[Message], int]:
     """Get messages for a conversation with pagination.
 
-    Validates ownership through conversation join (2 queries total).
+    Validates ownership via join, reducing queries when conversation has messages.
     """
     qs = Message.objects.filter(
         conversation_id=conversation_id,
         conversation__user_id=user_id,
-    )
+    ).order_by("created_at")
 
     total = qs.count()
 
-    # Distinguish "no messages" from "conversation not found"
-    if total == 0:
-        if not Conversation.objects.filter(id=conversation_id, user_id=user_id).exists():
-            raise NotFoundError("Conversation not found")
+    if total == 0 and not Conversation.objects.filter(id=conversation_id, user_id=user_id).exists():
+        raise NotFoundError("Conversation not found")
 
     offset = (page - 1) * page_size
-    messages = qs[offset : offset + page_size]
+    messages = list(qs[offset : offset + page_size])
 
     return messages, total
 
