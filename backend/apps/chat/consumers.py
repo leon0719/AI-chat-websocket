@@ -28,11 +28,14 @@ HEARTBEAT_INTERVAL = 30
 TASK_CANCEL_TIMEOUT = 5
 WS_MESSAGE_RATE_LIMIT = 20
 WS_RATE_LIMIT_WINDOW = 60
+AUTH_TIMEOUT = 30
 
 
 class WSMessageType(StrEnum):
     """WebSocket message types."""
 
+    AUTH = "auth"
+    AUTH_SUCCESS = "auth.success"
     CHAT_MESSAGE = "chat.message"
     CHAT_STREAM = "chat.stream"
     CHAT_ERROR = "chat.error"
@@ -45,6 +48,9 @@ class WSErrorCode(StrEnum):
 
     INVALID_JSON = "INVALID_JSON"
     UNKNOWN_TYPE = "UNKNOWN_TYPE"
+    AUTH_REQUIRED = "AUTH_REQUIRED"
+    AUTH_FAILED = "AUTH_FAILED"
+    AUTH_TIMEOUT = "AUTH_TIMEOUT"
     NO_CONVERSATION = "NO_CONVERSATION"
     RATE_LIMIT_EXCEEDED = "RATE_LIMIT_EXCEEDED"
     ALREADY_PROCESSING = "ALREADY_PROCESSING"
@@ -56,25 +62,33 @@ class WSErrorCode(StrEnum):
 
 
 class ChatConsumer(AsyncWebsocketConsumer):
-    """WebSocket consumer for chat functionality."""
+    """WebSocket consumer for chat functionality with in-band JWT authentication.
+
+    Authentication flow:
+    1. Client connects to WebSocket (no token in URL)
+    2. Server accepts connection and starts auth timeout
+    3. Client sends: {"type": "auth", "token": "<jwt>"}
+    4. Server validates token and loads conversation
+    5. Server sends: {"type": "auth.success", "conversation_id": "..."}
+    6. Client can now send chat messages
+
+    This is more secure than query param auth as tokens won't appear in logs.
+    """
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.conversation_id: UUID | None = None
         self.conversation: Conversation | None = None
+        self.user = None
+        self.is_authenticated = False
         self.ai_client = get_openai_client()
         self._heartbeat_task: asyncio.Task | None = None
+        self._auth_timeout_task: asyncio.Task | None = None
         self._processing_lock = asyncio.Lock()
         self._summary_task: asyncio.Task | None = None
 
     async def connect(self):
-        """Handle WebSocket connection."""
-        user = self.scope.get("user")
-
-        if not user:
-            await self.close(code=4001)
-            return
-
+        """Handle WebSocket connection - accept and wait for in-band auth."""
         conversation_id_str = self.scope["url_route"]["kwargs"]["conversation_id"]
 
         try:
@@ -83,18 +97,73 @@ class ChatConsumer(AsyncWebsocketConsumer):
             await self.close(code=4002)
             return
 
+        await self.accept()
+        self._auth_timeout_task = asyncio.create_task(self._auth_timeout())
+        logger.debug(f"WebSocket accepted, waiting for auth: conversation={self.conversation_id}")
+
+    async def _auth_timeout(self):
+        """Close connection if not authenticated within timeout."""
+        try:
+            await asyncio.sleep(AUTH_TIMEOUT)
+            if not self.is_authenticated:
+                logger.warning(f"WebSocket auth timeout: conversation={self.conversation_id}")
+                await self._send_error("Authentication timeout", WSErrorCode.AUTH_TIMEOUT)
+                await self.close(code=4001)
+        except asyncio.CancelledError:
+            pass
+
+    async def _handle_auth(self, data: dict) -> None:
+        """Handle in-band authentication message."""
+        if self.is_authenticated:
+            return
+
+        token = data.get("token", "")
+        if not token:
+            await self._send_error("Token is required", WSErrorCode.AUTH_FAILED)
+            await self.close(code=4001)
+            return
+
+        auth_helper = self.scope.get("auth_helper")
+        if not auth_helper:
+            logger.error("auth_helper not found in scope")
+            await self._send_error("Internal error", WSErrorCode.INTERNAL_ERROR)
+            await self.close(code=4001)
+            return
+
+        user = await auth_helper(token)
+        if user is None:
+            logger.warning("WebSocket auth failed: invalid token")
+            await self._send_error("Invalid or expired token", WSErrorCode.AUTH_FAILED)
+            await self.close(code=4001)
+            return
+
         try:
             self.conversation = await self._get_conversation(self.conversation_id, user.id)
         except NotFoundError:
+            await self._send_error("Conversation not found", WSErrorCode.NO_CONVERSATION)
             await self.close(code=4004)
             return
 
-        await self.accept()
+        self.user = user
+        self.is_authenticated = True
+        self.scope["user"] = user
+
+        await self._cancel_task(self._auth_timeout_task)
         self._heartbeat_task = asyncio.create_task(self._heartbeat())
-        logger.info(f"WebSocket connected: conversation={self.conversation_id}, user={user.id}")
+
+        await self.send(
+            text_data=orjson.dumps(
+                {
+                    "type": WSMessageType.AUTH_SUCCESS,
+                    "conversation_id": str(self.conversation_id),
+                }
+            ).decode()
+        )
+        logger.info(f"WebSocket authenticated: conversation={self.conversation_id}, user={user.id}")
 
     async def disconnect(self, close_code):
         """Handle WebSocket disconnection."""
+        await self._cancel_task(self._auth_timeout_task)
         await self._cancel_task(self._heartbeat_task)
         await self._cancel_task(self._summary_task)
         logger.info(
@@ -133,33 +202,35 @@ class ChatConsumer(AsyncWebsocketConsumer):
 
         msg_type = data.get("type")
 
-        if msg_type == WSMessageType.CHAT_MESSAGE:
-            await self._handle_chat_message(data)
+        if msg_type == WSMessageType.AUTH:
+            await self._handle_auth(data)
         elif msg_type == WSMessageType.PONG:
             pass
+        elif not self.is_authenticated:
+            await self._send_error("Authentication required", WSErrorCode.AUTH_REQUIRED)
+        elif msg_type == WSMessageType.CHAT_MESSAGE:
+            await self._handle_chat_message(data)
         else:
             await self._send_error("Unknown message type", WSErrorCode.UNKNOWN_TYPE)
 
     async def _handle_chat_message(self, data: dict):
         """Handle incoming chat message and stream AI response."""
-        if self.conversation is None or self.conversation_id is None:
+        if self.conversation is None or self.conversation_id is None or self.user is None:
             await self._send_error("No active conversation", WSErrorCode.NO_CONVERSATION)
             return
 
-        user = self.scope.get("user")
-        if user:
-            is_allowed, retry_after = check_ws_rate_limit(
-                identifier=str(user.id),
-                action="message",
-                max_requests=WS_MESSAGE_RATE_LIMIT,
-                window_seconds=WS_RATE_LIMIT_WINDOW,
+        is_allowed, retry_after = check_ws_rate_limit(
+            identifier=str(self.user.id),
+            action="message",
+            max_requests=WS_MESSAGE_RATE_LIMIT,
+            window_seconds=WS_RATE_LIMIT_WINDOW,
+        )
+        if not is_allowed:
+            await self._send_error(
+                f"Rate limit exceeded. Try again in {retry_after} seconds.",
+                WSErrorCode.RATE_LIMIT_EXCEEDED,
             )
-            if not is_allowed:
-                await self._send_error(
-                    f"Rate limit exceeded. Try again in {retry_after} seconds.",
-                    WSErrorCode.RATE_LIMIT_EXCEEDED,
-                )
-                return
+            return
 
         if self._processing_lock.locked():
             await self._send_error("Already processing a message", WSErrorCode.ALREADY_PROCESSING)
@@ -346,7 +417,8 @@ class ChatConsumer(AsyncWebsocketConsumer):
     @database_sync_to_async
     def _get_history_with_token_limit(self) -> tuple[list[dict], int]:
         """Get conversation history with token limit."""
-        assert self.conversation_id is not None and self.conversation is not None
+        if self.conversation_id is None or self.conversation is None:
+            raise RuntimeError("Conversation required for getting history")
         return get_conversation_history_with_token_limit(
             conversation_id=self.conversation_id,
             model=self.conversation.model,

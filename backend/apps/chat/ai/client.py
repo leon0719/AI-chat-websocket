@@ -1,9 +1,9 @@
 """OpenAI client wrapper for streaming chat completions with retry support."""
 
 import logging
+import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from functools import lru_cache
 from typing import Any
 
 from openai import APIConnectionError, APITimeoutError, AsyncOpenAI, OpenAIError, RateLimitError
@@ -20,6 +20,10 @@ from apps.core.log_config import logger
 from config.settings.base import get_settings
 
 _tenacity_logger = logging.getLogger(__name__)  # tenacity requires stdlib Logger
+
+# Thread-safe singleton for OpenAI client
+_openai_client: "OpenAIClient | None" = None
+_client_lock = threading.Lock()
 
 RETRYABLE_EXCEPTIONS = (
     APIConnectionError,
@@ -116,7 +120,22 @@ class OpenAIClient:
             }
 
 
-@lru_cache(maxsize=1)
 def get_openai_client() -> OpenAIClient:
-    """Get singleton OpenAI client instance."""
-    return OpenAIClient()
+    """Get thread-safe singleton OpenAI client instance.
+
+    Uses double-checked locking pattern to ensure thread safety
+    while minimizing lock contention after initialization.
+    """
+    global _openai_client
+    if _openai_client is None:
+        with _client_lock:
+            if _openai_client is None:
+                _openai_client = OpenAIClient()
+    return _openai_client
+
+
+def reset_openai_client() -> None:
+    """Reset singleton client instance. For testing purposes only."""
+    global _openai_client
+    with _client_lock:
+        _openai_client = None

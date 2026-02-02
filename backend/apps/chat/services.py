@@ -18,15 +18,27 @@ def get_user_conversations(
     page: int = 1,
     page_size: int = 20,
 ) -> tuple[list[Conversation], int]:
-    """Get conversations for a user with pagination."""
+    """Get conversations for a user with pagination.
+
+    Uses optimized single-query approach: fetches page_size + 1 items to detect
+    if there are more pages, then calculates total only when necessary.
+    For first page with fewer items than page_size, total equals item count.
+    """
     qs = Conversation.objects.filter(user_id=user_id)
     if not include_archived:
         qs = qs.filter(is_archived=False)
     qs = qs.order_by("-updated_at")
 
-    total = qs.count()
     offset = (page - 1) * page_size
-    conversations = list(qs[offset : offset + page_size])
+    conversations = list(qs[offset : offset + page_size + 1])
+
+    has_more = len(conversations) > page_size
+    conversations = conversations[:page_size]
+
+    if page == 1 and not has_more:
+        total = len(conversations)
+    else:
+        total = qs.count()
 
     return conversations, total
 
@@ -89,20 +101,24 @@ def get_conversation_messages(
 ) -> tuple[list[Message], int]:
     """Get messages for a conversation with pagination.
 
-    Validates ownership via join, reducing queries when conversation has messages.
+    Validates ownership via join. Uses optimized single-query approach for
+    first page when possible.
     """
-    qs = Message.objects.filter(
-        conversation_id=conversation_id,
-        conversation__user_id=user_id,
-    ).order_by("created_at")
-
-    total = qs.count()
-
-    if total == 0 and not Conversation.objects.filter(id=conversation_id, user_id=user_id).exists():
+    if not Conversation.objects.filter(id=conversation_id, user_id=user_id).exists():
         raise NotFoundError("Conversation not found")
 
+    qs = Message.objects.filter(conversation_id=conversation_id).order_by("created_at")
+
     offset = (page - 1) * page_size
-    messages = list(qs[offset : offset + page_size])
+    messages = list(qs[offset : offset + page_size + 1])
+
+    has_more = len(messages) > page_size
+    messages = messages[:page_size]
+
+    if page == 1 and not has_more:
+        total = len(messages)
+    else:
+        total = qs.count()
 
     return messages, total
 

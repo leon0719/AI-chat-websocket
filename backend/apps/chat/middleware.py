@@ -1,46 +1,35 @@
 """WebSocket authentication middleware."""
 
-from urllib.parse import parse_qs
-
 from channels.db import database_sync_to_async
 from channels.middleware import BaseMiddleware
 
-from apps.core.log_config import logger
 from apps.users.auth import get_user_from_token
 
 
 class JWTAuthMiddleware(BaseMiddleware):
-    """JWT authentication middleware for WebSocket connections."""
+    """JWT authentication middleware for WebSocket connections.
+
+    Supports in-band authentication where the client sends the token
+    after establishing the connection, rather than in the query string.
+    This is more secure as tokens won't appear in server logs or browser history.
+
+    The consumer is responsible for:
+    1. Accepting the connection
+    2. Requiring an 'auth' message with the token before any other operations
+    3. Closing the connection if authentication fails or times out
+    """
 
     async def __call__(self, scope, receive, send):
-        """Authenticate WebSocket connection using JWT token from query string.
+        """Allow WebSocket connection and delegate auth to consumer.
 
-        Rejects connections without valid authentication at middleware level.
+        Sets user to None initially; consumer handles in-band authentication.
         """
-        query_string = scope.get("query_string", b"").decode()
-        query_params = parse_qs(query_string)
-
-        token = query_params.get("token", [None])[0]
-
-        if not token:
-            logger.warning("WebSocket connection rejected: missing token")
-            await self._reject_connection(send, 4001)
-            return
-
-        user = await self._get_user(token)
-        if user is None:
-            logger.warning("WebSocket connection rejected: invalid token")
-            await self._reject_connection(send, 4001)
-            return
-
-        scope["user"] = user
+        scope["user"] = None
+        scope["auth_helper"] = self._get_user
         return await super().__call__(scope, receive, send)
 
-    async def _reject_connection(self, send, code: int):
-        """Reject WebSocket connection with specific close code."""
-        await send({"type": "websocket.close", "code": code})
-
+    @staticmethod
     @database_sync_to_async
-    def _get_user(self, token: str):
+    def _get_user(token: str):
         """Get user from token (sync to async wrapper)."""
         return get_user_from_token(token)

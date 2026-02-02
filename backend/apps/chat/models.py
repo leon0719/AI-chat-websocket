@@ -46,7 +46,10 @@ class Conversation(models.Model):
     )
     is_archived = models.BooleanField(default=False)
     summary = models.TextField(
-        blank=True, default="", help_text="AI-generated conversation summary"
+        blank=True,
+        default="",
+        help_text="AI-generated conversation summary",
+        validators=[MaxLengthValidator(2000)],
     )
     summary_token_count = models.IntegerField(
         default=0,

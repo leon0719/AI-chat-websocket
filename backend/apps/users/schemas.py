@@ -10,7 +10,7 @@ from pydantic import EmailStr, Field, field_validator
 class UserRegisterSchema(Schema):
     """Schema for user registration."""
 
-    email: EmailStr
+    email: EmailStr = Field(max_length=255)
     username: str = Field(min_length=3, max_length=50, pattern=r"^[a-zA-Z0-9_-]+$")
     password: str = Field(min_length=12, max_length=128)
 

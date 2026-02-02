@@ -53,14 +53,18 @@ class JWTAuth(BaseJWTAuth):
     """Custom JWT authentication with blacklist support.
 
     Extends ninja_jwt's JWTAuth to check if tokens have been blacklisted
-    (e.g., after logout).
+    (e.g., after logout) and validates token type to prevent type confusion.
     """
 
     def authenticate(self, request: HttpRequest, token: str) -> Any:
-        """Authenticate request with blacklist check."""
+        """Authenticate request with token type and blacklist check."""
         payload = decode_jwt_token(token, verify_exp=True)
         if payload is None:
             return super().authenticate(request, token)
+
+        actual_token_type = payload.get("token_type")
+        if actual_token_type != TokenType.ACCESS.value:
+            raise AuthenticationFailed("Invalid token type")
 
         jti = payload.get("jti")
         if jti and is_token_blacklisted(jti):

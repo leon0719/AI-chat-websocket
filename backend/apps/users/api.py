@@ -42,7 +42,7 @@ def me(request):
     response={200: LogoutResponseSchema, 401: ErrorSchema},
     auth=JWTAuth(),
 )
-def logout(request, payload: LogoutSchema = None):
+def logout(request, payload: LogoutSchema | None = None):
     """Logout and invalidate access and refresh tokens."""
     auth_header = request.headers.get("Authorization", "")
     if auth_header.startswith("Bearer "):
