@@ -7,8 +7,7 @@ from django.db import DatabaseError, IntegrityError
 from django.http import HttpRequest
 from django.urls import path
 from ninja.throttling import AnonRateThrottle, AuthRateThrottle
-from ninja_extra import NinjaExtraAPI, api_controller
-from ninja_jwt.controller import TokenObtainPairController
+from ninja_extra import NinjaExtraAPI
 
 from apps.chat.api import router as chat_router
 from apps.core.api import router as core_router
@@ -85,17 +84,8 @@ def handle_database_error(request: HttpRequest, exc: DatabaseError):
     )
 
 
-@api_controller("/auth/token", tags=["auth"])
-class JWTController(TokenObtainPairController):
-    """JWT controller with pair and refresh endpoints only (no verify)."""
-
-    pass
-
-
-api.register_controllers(JWTController)
-
 api.add_router("", core_router, tags=["health"])
-# Auth endpoints have stricter rate limits (applied at endpoint level)
+# Auth endpoints include custom JWT token/pair and token/refresh with HttpOnly cookie support
 api.add_router("/auth", users_router, tags=["auth"])
 api.add_router("/conversations", chat_router, tags=["conversations"])
 

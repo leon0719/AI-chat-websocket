@@ -6,15 +6,18 @@ from uuid import UUID
 from ninja import Schema
 from pydantic import EmailStr, Field, field_validator
 
-from apps.core.schemas import ErrorSchema
 
-__all__ = [
-    "ErrorSchema",
-    "LogoutResponseSchema",
-    "LogoutSchema",
-    "UserRegisterSchema",
-    "UserSchema",
-]
+class LoginSchema(Schema):
+    """Schema for login request."""
+
+    email: EmailStr = Field(max_length=255)
+    password: str = Field(min_length=1, max_length=128)
+
+
+class TokenResponseSchema(Schema):
+    """Schema for token response (access token only, refresh in HttpOnly cookie)."""
+
+    access: str = Field(min_length=10, max_length=1000)
 
 
 class UserRegisterSchema(Schema):

@@ -60,7 +60,8 @@ class TestAuthEndpoints:
         )
         data = response.json()
         assert "access" in data
-        assert "refresh" in data
+        # refresh token is now in HttpOnly cookie, not in response body
+        assert "refresh_token" in response.cookies
 
     def test_login_invalid_credentials(self, api_client, user):
         """Test login with invalid credentials."""
@@ -86,8 +87,8 @@ class TestAuthEndpoints:
         assert response.status_code == 401
 
     def test_token_refresh(self, api_client, user):
-        """Test token refresh."""
-        # First login to get tokens
+        """Test token refresh using HttpOnly cookie."""
+        # First login to get refresh token in cookie
         login_response = api_client.post(
             "/auth/token/pair",
             json={
@@ -96,15 +97,22 @@ class TestAuthEndpoints:
             },
         )
         assert login_response.status_code == 200
-        refresh_token = login_response.json()["refresh"]
+        refresh_token_morsel = login_response.cookies.get("refresh_token")
+        assert refresh_token_morsel is not None
+        # Extract actual value from Morsel object
+        refresh_token_value = refresh_token_morsel.value
 
-        # Then refresh the token
+        # Then refresh the token with cookie
         refresh_response = api_client.post(
             "/auth/token/refresh",
-            json={"refresh": refresh_token},
+            COOKIES={"refresh_token": refresh_token_value},
         )
-        assert refresh_response.status_code == 200
+        assert refresh_response.status_code == 200, (
+            f"Expected 200, got {refresh_response.status_code}: {refresh_response.json()}"
+        )
         assert "access" in refresh_response.json()
+        # Token rotation: new refresh token should be set in cookie
+        assert "refresh_token" in refresh_response.cookies
 
     def test_logout_success(self, authenticated_client, user):
         """Test successful logout."""
