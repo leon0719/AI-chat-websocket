@@ -45,7 +45,6 @@ class Conversation(models.Model):
         validators=[MinValueValidator(0.0), MaxValueValidator(2.0)],
     )
     is_archived = models.BooleanField(default=False)
-    # 對話摘要相關欄位
     summary = models.TextField(
         blank=True, default="", help_text="AI-generated conversation summary"
     )

@@ -4,7 +4,7 @@ import asyncio
 from enum import StrEnum
 from uuid import UUID
 
-import bleach
+import nh3
 import orjson
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
@@ -23,14 +23,9 @@ from apps.core.exceptions import AIServiceError, NotFoundError
 from apps.core.log_config import logger
 from apps.core.ratelimit import check_ws_rate_limit
 
-# AI streaming timeout - if exceeded, user message is saved but AI response is not
 AI_STREAM_TIMEOUT = 120
-# WebSocket heartbeat interval for connection keep-alive
 HEARTBEAT_INTERVAL = 30
-# Timeout for cancelling background tasks on disconnect (heartbeat, summary generation)
-# Summary tasks may not complete if client disconnects abruptly
 TASK_CANCEL_TIMEOUT = 5
-# Rate limiting: max messages per window
 WS_MESSAGE_RATE_LIMIT = 20
 WS_RATE_LIMIT_WINDOW = 60
 
@@ -143,7 +138,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
         elif msg_type == WSMessageType.PONG:
             pass
         else:
-            await self._send_error(f"Unknown message type: {msg_type}", WSErrorCode.UNKNOWN_TYPE)
+            await self._send_error("Unknown message type", WSErrorCode.UNKNOWN_TYPE)
 
     async def _handle_chat_message(self, data: dict):
         """Handle incoming chat message and stream AI response."""
@@ -216,7 +211,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
             await self._send_error("Message content is required", WSErrorCode.EMPTY_CONTENT)
             return None
 
-        content = bleach.clean(raw_content, tags=[], strip=True)
+        content = nh3.clean(raw_content, tags=set())
 
         if len(content) > MAX_USER_MESSAGE_LENGTH:
             await self._send_error(
@@ -228,10 +223,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
         return content
 
     def _build_chat_messages(self, history: list[dict]) -> list[dict]:
-        """Build the message list for AI API call.
-
-        Note: This is only called from _process_chat_message after conversation validation.
-        """
+        """Build the message list for AI API call."""
         if self.conversation is None:
             raise RuntimeError("Conversation required for building messages")
         messages = [{"role": "system", "content": self.conversation.system_prompt}]
@@ -248,10 +240,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
         return messages
 
     async def _stream_ai_response(self, messages: list[dict]) -> tuple[str, dict]:
-        """Stream AI response and return full response with usage stats.
-
-        Note: This is only called from _process_chat_message after conversation validation.
-        """
+        """Stream AI response and return full response with usage stats."""
         if self.conversation is None:
             raise RuntimeError("Conversation required for streaming AI response")
         full_response = ""
@@ -280,10 +269,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
         history: list[dict],
         total_tokens: int,
     ) -> None:
-        """Save assistant message and trigger summary if needed.
-
-        Note: This is only called from _process_chat_message after conversation validation.
-        """
+        """Save assistant message and trigger summary if needed."""
         if self.conversation is None or self.conversation_id is None:
             raise RuntimeError("Conversation required for saving response")
         assistant_message = await self._save_message(

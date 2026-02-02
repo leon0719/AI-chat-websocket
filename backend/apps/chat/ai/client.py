@@ -19,10 +19,8 @@ from apps.core.exceptions import AIServiceError
 from apps.core.log_config import logger
 from config.settings.base import get_settings
 
-# tenacity requires stdlib logging.Logger
-_tenacity_logger = logging.getLogger(__name__)
+_tenacity_logger = logging.getLogger(__name__)  # tenacity requires stdlib Logger
 
-# Exceptions that should trigger a retry
 RETRYABLE_EXCEPTIONS = (
     APIConnectionError,
     APITimeoutError,
@@ -70,15 +68,7 @@ class OpenAIClient:
         temperature: float = 0.7,
         max_tokens: int | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
-        """Stream chat completion responses with retry support.
-
-        Yields dictionaries with either:
-        - {"type": "content", "content": "..."} for content chunks
-        - {"type": "usage", "prompt_tokens": N, "completion_tokens": N} for usage info
-
-        Note: Retry is applied to the initial API call. If streaming fails mid-way,
-        the entire request needs to be retried from the consumer level.
-        """
+        """Stream chat completion responses with retry support."""
         async with handle_openai_errors():
             stream = await self._call_openai(
                 model=model,
@@ -109,15 +99,7 @@ class OpenAIClient:
         temperature: float = 0.7,
         max_tokens: int | None = None,
     ) -> dict[str, Any]:
-        """Non-streaming chat completion with retry support.
-
-        Returns:
-            {
-                "content": "...",
-                "prompt_tokens": N,
-                "completion_tokens": N,
-            }
-        """
+        """Non-streaming chat completion with retry support."""
         async with handle_openai_errors():
             response = await self._call_openai(
                 model=model,

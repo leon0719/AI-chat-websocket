@@ -202,6 +202,6 @@ NINJA_JWT = {
 # Django Axes - brute force protection
 AXES_FAILURE_LIMIT = 5
 AXES_COOLOFF_TIME = timedelta(minutes=15)
-AXES_LOCKOUT_PARAMETERS = ["username"]
+AXES_LOCKOUT_PARAMETERS = ["username", "ip_address"]
 AXES_HANDLER = "axes.handlers.cache.AxesCacheHandler"
 AXES_CACHE = "default"

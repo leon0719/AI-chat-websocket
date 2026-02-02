@@ -36,17 +36,7 @@ def check_ws_rate_limit(
     max_requests: int = 20,
     window_seconds: int = 60,
 ) -> tuple[bool, int]:
-    """Check rate limit for WebSocket actions using atomic Redis operations.
-
-    Args:
-        identifier: Unique identifier (user ID or connection ID)
-        action: Action name (e.g., "message", "connect")
-        max_requests: Maximum allowed requests in window
-        window_seconds: Time window in seconds
-
-    Returns:
-        Tuple of (is_allowed, retry_after_seconds)
-    """
+    """Check rate limit for WebSocket actions. Returns (is_allowed, retry_after_seconds)."""
     key = _get_rate_limit_key(identifier, action)
     now = time.time()
 

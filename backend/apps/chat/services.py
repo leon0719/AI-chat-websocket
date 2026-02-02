@@ -12,15 +12,23 @@ from apps.chat.schemas import ConversationCreateSchema, ConversationUpdateSchema
 from apps.core.exceptions import NotFoundError
 
 
-def get_user_conversations(user_id: UUID, include_archived: bool = False) -> list[Conversation]:
-    """Get all conversations for a user.
-
-    Ordered by updated_at descending (most recent first).
-    """
+def get_user_conversations(
+    user_id: UUID,
+    include_archived: bool = False,
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[list[Conversation], int]:
+    """Get conversations for a user with pagination."""
     qs = Conversation.objects.filter(user_id=user_id)
     if not include_archived:
         qs = qs.filter(is_archived=False)
-    return list(qs.order_by("-updated_at"))
+    qs = qs.order_by("-updated_at")
+
+    total = qs.count()
+    offset = (page - 1) * page_size
+    conversations = list(qs[offset : offset + page_size])
+
+    return conversations, total
 
 
 def get_conversation(conversation_id: UUID, user_id: UUID) -> Conversation:
@@ -48,18 +56,25 @@ def update_conversation(
     """Update a conversation."""
     conversation = get_conversation(conversation_id, user_id)
 
+    update_fields = []
     if data.title is not None:
         conversation.title = data.title
+        update_fields.append("title")
     if data.model is not None:
         conversation.model = data.model
+        update_fields.append("model")
     if data.system_prompt is not None:
         conversation.system_prompt = data.system_prompt
+        update_fields.append("system_prompt")
     if data.temperature is not None:
         conversation.temperature = data.temperature
+        update_fields.append("temperature")
     if data.is_archived is not None:
         conversation.is_archived = data.is_archived
+        update_fields.append("is_archived")
 
-    conversation.save()
+    if update_fields:
+        conversation.save(update_fields=update_fields)
     return conversation
 
 
@@ -118,21 +133,7 @@ def get_conversation_history_with_token_limit(
     system_prompt: str = "",
     summary: str = "",
 ) -> tuple[list[dict], int]:
-    """
-    獲取對話歷史，根據 token 限制動態調整。
-
-    從最新訊息開始，逐條加入直到達到 token 上限。
-
-    Args:
-        conversation_id: 對話 ID
-        model: 使用的模型
-        max_tokens: 最大 token 數，None 則使用模型預設上限
-        system_prompt: 系統提示詞（用於計算保留空間）
-        summary: 對話摘要（用於計算保留空間）
-
-    Returns:
-        (訊息列表, 總 token 數)
-    """
+    """Get conversation history within token limit, starting from newest messages."""
     if max_tokens is None:
         max_tokens = get_token_limit(model)
 
@@ -162,8 +163,10 @@ def get_conversation_history_with_token_limit(
         if current_tokens + msg_tokens > available_tokens:
             break
 
-        selected_messages.insert(0, msg_dict)
+        selected_messages.append(msg_dict)
         current_tokens += msg_tokens
+
+    selected_messages.reverse()
 
     total_tokens = reserved_tokens + current_tokens
     return selected_messages, total_tokens
@@ -174,13 +177,7 @@ def update_conversation_summary(
     summary: str,
     token_count: int,
 ) -> Conversation:
-    """更新對話摘要。
-
-    Args:
-        conversation: 對話物件（避免額外查詢）
-        summary: 摘要內容
-        token_count: Token 數量
-    """
+    """Update conversation summary."""
     conversation.summary = summary
     conversation.summary_token_count = token_count
     conversation.last_summarized_at = datetime.now(UTC)

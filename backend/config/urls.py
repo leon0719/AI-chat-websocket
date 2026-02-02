@@ -3,7 +3,7 @@
 from django.conf import settings
 from django.conf.urls.static import static
 from django.contrib import admin
-from django.db import DatabaseError
+from django.db import DatabaseError, IntegrityError
 from django.http import HttpRequest
 from django.urls import path
 from ninja.throttling import AnonRateThrottle, AuthRateThrottle
@@ -14,7 +14,6 @@ from apps.chat.api import router as chat_router
 from apps.core.api import router as core_router
 from apps.core.exceptions import (
     AIServiceError,
-    AppError,
     AuthenticationError,
     AuthorizationError,
     NotFoundError,
@@ -34,28 +33,47 @@ api = NinjaExtraAPI(
     ],
 )
 
-# Exception code to HTTP status mapping
-_EXCEPTION_STATUS_MAP: dict[type[AppError], int] = {
-    NotFoundError: 404,
-    ValidationError: 400,
-    AuthenticationError: 401,
-    AuthorizationError: 403,
-    AIServiceError: 503,
-}
 
-for exc_class, status_code in _EXCEPTION_STATUS_MAP.items():
+@api.exception_handler(NotFoundError)
+def handle_not_found(request: HttpRequest, exc: NotFoundError):
+    """Handle NotFoundError (404)."""
+    return api.create_response(request, {"error": exc.message, "code": exc.code}, status=404)
 
-    def _make_handler(status: int):
-        def handler(request: HttpRequest, exc: AppError):
-            if status >= 500:
-                logger.error(f"{exc.__class__.__name__}: {exc.message}")
-            return api.create_response(
-                request, {"error": exc.message, "code": exc.code}, status=status
-            )
 
-        return handler
+@api.exception_handler(ValidationError)
+def handle_validation_error(request: HttpRequest, exc: ValidationError):
+    """Handle ValidationError (400)."""
+    return api.create_response(request, {"error": exc.message, "code": exc.code}, status=400)
 
-    api.exception_handler(exc_class)(_make_handler(status_code))
+
+@api.exception_handler(AuthenticationError)
+def handle_authentication_error(request: HttpRequest, exc: AuthenticationError):
+    """Handle AuthenticationError (401)."""
+    return api.create_response(request, {"error": exc.message, "code": exc.code}, status=401)
+
+
+@api.exception_handler(AuthorizationError)
+def handle_authorization_error(request: HttpRequest, exc: AuthorizationError):
+    """Handle AuthorizationError (403)."""
+    return api.create_response(request, {"error": exc.message, "code": exc.code}, status=403)
+
+
+@api.exception_handler(AIServiceError)
+def handle_ai_service_error(request: HttpRequest, exc: AIServiceError):
+    """Handle AIServiceError (503)."""
+    logger.error(f"AIServiceError: {exc.message}")
+    return api.create_response(request, {"error": exc.message, "code": exc.code}, status=503)
+
+
+@api.exception_handler(IntegrityError)
+def handle_integrity_error(request: HttpRequest, exc: IntegrityError):
+    """Handle IntegrityError globally (e.g., duplicate email/username)."""
+    logger.warning(f"Integrity error: {exc}")
+    return api.create_response(
+        request,
+        {"error": "Resource already exists or constraint violated", "code": "INTEGRITY_ERROR"},
+        status=400,
+    )
 
 
 @api.exception_handler(DatabaseError)

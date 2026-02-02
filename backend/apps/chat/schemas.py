@@ -101,3 +101,12 @@ class PaginatedMessagesSchema(Schema):
     total: int = Field(ge=0)
     page: int = Field(ge=1)
     page_size: int = Field(ge=1, le=100)
+
+
+class PaginatedConversationsSchema(Schema):
+    """Schema for paginated conversations response."""
+
+    conversations: list[ConversationListSchema]
+    total: int = Field(ge=0)
+    page: int = Field(ge=1)
+    page_size: int = Field(ge=1, le=100)

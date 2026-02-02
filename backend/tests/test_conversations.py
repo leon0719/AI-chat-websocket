@@ -13,7 +13,9 @@ class TestConversationEndpoints:
         """Test listing conversations when empty."""
         response = authenticated_client.get("/conversations/")
         assert response.status_code == 200
-        assert response.json() == []
+        data = response.json()
+        assert data["conversations"] == []
+        assert data["total"] == 0
 
     def test_create_conversation(self, authenticated_client):
         """Test creating a new conversation."""
@@ -45,7 +47,8 @@ class TestConversationEndpoints:
         response = authenticated_client.get("/conversations/")
         assert response.status_code == 200
         data = response.json()
-        assert len(data) == 2
+        assert len(data["conversations"]) == 2
+        assert data["total"] == 2
 
     def test_get_conversation(self, authenticated_client, user):
         """Test getting a specific conversation."""

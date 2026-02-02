@@ -1,11 +1,8 @@
 """User API endpoints."""
 
-from django.db import DatabaseError, IntegrityError
 from ninja import Router
 from ninja.throttling import AnonRateThrottle
 
-from apps.core.exceptions import ValidationError
-from apps.core.log_config import logger
 from apps.users.auth import JWTAuth
 from apps.users.schemas import (
     ErrorSchema,
@@ -26,24 +23,12 @@ router = Router()
 )
 def register(request, payload: UserRegisterSchema):
     """Register a new user."""
-    try:
-        user = register_user(
-            email=payload.email,
-            username=payload.username,
-            password=payload.password,
-        )
-        return 201, user
-    except ValidationError as e:
-        return 400, {"error": e.message, "code": e.code}
-    except IntegrityError as e:
-        logger.warning(f"Registration integrity error: {e}")
-        return 400, {"error": "Email or username already exists", "code": "VALIDATION_ERROR"}
-    except DatabaseError as e:
-        logger.exception(f"Database error during registration: {e}")
-        return 500, {"error": "Database error occurred", "code": "DATABASE_ERROR"}
-    except Exception as e:
-        logger.exception(f"Unexpected error during registration: {e}")
-        return 500, {"error": "An unexpected error occurred", "code": "INTERNAL_ERROR"}
+    user = register_user(
+        email=payload.email,
+        username=payload.username,
+        password=payload.password,
+    )
+    return 201, user
 
 
 @router.get("/me", response={200: UserSchema, 401: ErrorSchema}, auth=JWTAuth())

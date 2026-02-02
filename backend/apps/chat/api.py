@@ -2,14 +2,13 @@
 
 from uuid import UUID
 
-from ninja import Router
-from pydantic import Field
+from ninja import Query, Router
 
 from apps.chat.schemas import (
     ConversationCreateSchema,
-    ConversationListSchema,
     ConversationSchema,
     ConversationUpdateSchema,
+    PaginatedConversationsSchema,
     PaginatedMessagesSchema,
 )
 from apps.chat.services import (
@@ -26,15 +25,27 @@ from apps.users.schemas import ErrorSchema
 router = Router(auth=JWTAuth())
 
 
-@router.get("/", response=list[ConversationListSchema])
-def list_conversations(request, include_archived: bool = False):
+@router.get("/", response=PaginatedConversationsSchema)
+def list_conversations(
+    request,
+    include_archived: bool = False,
+    page: int = Query(1, ge=1, le=10000),
+    page_size: int = Query(20, ge=1, le=100),
+):
     """List all conversations for the current user."""
-    conversations = get_user_conversations(request.auth.id, include_archived)
-    return list(conversations)
+    conversations, total = get_user_conversations(
+        request.auth.id, include_archived, page, page_size
+    )
+    return {
+        "conversations": conversations,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
 
 
 @router.post("/", response={201: ConversationSchema, 400: ErrorSchema})
-def create_conversation_endpoint(request, payload: ConversationCreateSchema):
+def create_conversation_api(request, payload: ConversationCreateSchema):
     """Create a new conversation."""
     conversation = create_conversation(request.auth.id, payload)
     return 201, conversation
@@ -43,7 +54,7 @@ def create_conversation_endpoint(request, payload: ConversationCreateSchema):
 @router.get(
     "/{conversation_id}", response={200: ConversationSchema, 404: ErrorSchema, 500: ErrorSchema}
 )
-def get_conversation_endpoint(request, conversation_id: UUID):
+def get_conversation_api(request, conversation_id: UUID):
     """Get a conversation by ID."""
     conversation = get_conversation(conversation_id, request.auth.id)
     return 200, conversation
@@ -53,14 +64,14 @@ def get_conversation_endpoint(request, conversation_id: UUID):
     "/{conversation_id}",
     response={200: ConversationSchema, 400: ErrorSchema, 404: ErrorSchema, 500: ErrorSchema},
 )
-def update_conversation_endpoint(request, conversation_id: UUID, payload: ConversationUpdateSchema):
+def update_conversation_api(request, conversation_id: UUID, payload: ConversationUpdateSchema):
     """Update a conversation."""
     conversation = update_conversation(conversation_id, request.auth.id, payload)
     return 200, conversation
 
 
 @router.delete("/{conversation_id}", response={204: None, 404: ErrorSchema, 500: ErrorSchema})
-def delete_conversation_endpoint(request, conversation_id: UUID):
+def delete_conversation_api(request, conversation_id: UUID):
     """Delete a conversation."""
     delete_conversation(conversation_id, request.auth.id)
     return 204, None
@@ -73,8 +84,8 @@ def delete_conversation_endpoint(request, conversation_id: UUID):
 def list_messages(
     request,
     conversation_id: UUID,
-    page: int = Field(1, ge=1),
-    page_size: int = Field(50, ge=1, le=100),
+    page: int = Query(1, ge=1, le=10000),
+    page_size: int = Query(50, ge=1, le=100),
 ):
     """List messages for a conversation."""
     messages, total = get_conversation_messages(conversation_id, request.auth.id, page, page_size)

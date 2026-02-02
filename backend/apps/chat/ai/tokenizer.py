@@ -1,5 +1,7 @@
 """Token counting utilities for chat messages."""
 
+from functools import lru_cache
+
 import tiktoken
 
 # 模型 token 上限配置
@@ -23,6 +25,7 @@ TOKENS_PER_MESSAGE = 4
 TOKENS_PER_NAME = 1
 
 
+@lru_cache(maxsize=8)
 def get_encoding(model: str = "gpt-4o") -> tiktoken.Encoding:
     """取得模型對應的 encoding。"""
     try:
