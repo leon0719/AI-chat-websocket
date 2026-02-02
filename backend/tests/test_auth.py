@@ -49,7 +49,7 @@ class TestAuthEndpoints:
     def test_login_success(self, api_client, user):
         """Test successful login via token/pair endpoint."""
         response = api_client.post(
-            "/token/pair",
+            "/auth/token/pair",
             json={
                 "email": TEST_EMAIL,
                 "password": TEST_PASSWORD,
@@ -65,7 +65,7 @@ class TestAuthEndpoints:
     def test_login_invalid_credentials(self, api_client, user):
         """Test login with invalid credentials."""
         response = api_client.post(
-            "/token/pair",
+            "/auth/token/pair",
             json={
                 "email": "test@example.com",
                 "password": "wrongpassword",
@@ -89,7 +89,7 @@ class TestAuthEndpoints:
         """Test token refresh."""
         # First login to get tokens
         login_response = api_client.post(
-            "/token/pair",
+            "/auth/token/pair",
             json={
                 "email": TEST_EMAIL,
                 "password": TEST_PASSWORD,
@@ -100,7 +100,7 @@ class TestAuthEndpoints:
 
         # Then refresh the token
         refresh_response = api_client.post(
-            "/token/refresh",
+            "/auth/token/refresh",
             json={"refresh": refresh_token},
         )
         assert refresh_response.status_code == 200
