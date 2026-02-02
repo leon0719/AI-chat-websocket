@@ -43,3 +43,10 @@ class AIServiceError(AppError):
 
     def __init__(self, message: str = "AI service error"):
         super().__init__(message, code="AI_ERROR")
+
+
+class InvalidStateError(AppError):
+    """Invalid application state."""
+
+    def __init__(self, message: str = "Invalid application state"):
+        super().__init__(message, code="INVALID_STATE")

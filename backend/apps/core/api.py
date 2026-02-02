@@ -1,8 +1,9 @@
 """Core API endpoints."""
 
 from django.core.cache import cache
-from django.db import connection
+from django.db import DatabaseError, OperationalError, connection
 from ninja import Router
+from redis.exceptions import RedisError
 
 from apps.core.log_config import logger
 
@@ -21,7 +22,7 @@ def health_check(request):
     try:
         with connection.cursor() as cursor:
             cursor.execute("SELECT 1")
-    except Exception:
+    except (DatabaseError, OperationalError):
         logger.exception("Database health check failed")
         health["database"] = "error"
         health["status"] = "unhealthy"
@@ -29,7 +30,7 @@ def health_check(request):
     try:
         cache.set("health_check", "ok", 1)
         cache.get("health_check")
-    except Exception:
+    except (RedisError, ConnectionError, TimeoutError):
         logger.exception("Redis health check failed")
         health["redis"] = "error"
         health["status"] = "unhealthy"

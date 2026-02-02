@@ -44,10 +44,13 @@ def is_token_blacklisted(jti: str) -> bool:
 def register_user(email: str, username: str, password: str) -> User:
     """Register a new user."""
     if User.objects.filter(Q(email=email) | Q(username=username)).exists():
+        logger.warning(f"Registration failed: duplicate email or username attempt for {email}")
         raise ValidationError(REGISTRATION_ERROR_MESSAGE)
 
-    return User.objects.create(
+    user = User.objects.create(
         email=email,
         username=username,
         password=make_password(password),
     )
+    logger.info(f"New user registered: user_id={user.id}, email={email}")
+    return user

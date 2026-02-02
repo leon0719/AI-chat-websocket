@@ -6,6 +6,16 @@ from uuid import UUID
 from ninja import Schema
 from pydantic import EmailStr, Field, field_validator
 
+from apps.core.schemas import ErrorSchema
+
+__all__ = [
+    "ErrorSchema",
+    "LogoutResponseSchema",
+    "LogoutSchema",
+    "UserRegisterSchema",
+    "UserSchema",
+]
+
 
 class UserRegisterSchema(Schema):
     """Schema for user registration."""
@@ -33,15 +43,8 @@ class UserSchema(Schema):
     """Schema for user response."""
 
     id: UUID
-    email: str = Field(max_length=255)
-    username: str = Field(max_length=50)
-
-
-class ErrorSchema(Schema):
-    """Schema for error response."""
-
-    error: str = Field(min_length=1, max_length=500)
-    code: str = Field(min_length=1, max_length=50, pattern=r"^[A-Z_]+$")
+    email: str = Field(min_length=5, max_length=255)
+    username: str = Field(min_length=3, max_length=50)
 
 
 class LogoutSchema(Schema):

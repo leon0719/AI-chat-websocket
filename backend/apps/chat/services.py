@@ -8,7 +8,6 @@ from apps.chat.ai.tokenizer import (
     get_token_limit,
 )
 from apps.chat.models import Conversation, Message
-from apps.chat.schemas import ConversationCreateSchema, ConversationUpdateSchema
 from apps.core.exceptions import NotFoundError
 
 
@@ -17,14 +16,18 @@ def get_user_conversations(
     include_archived: bool = False,
     page: int = 1,
     page_size: int = 20,
-) -> tuple[list[Conversation], int]:
+) -> tuple[list[Conversation], int, bool]:
     """Get conversations for a user with pagination.
 
     Uses optimized single-query approach: fetches page_size + 1 items to detect
-    if there are more pages, then calculates total only when necessary.
-    For first page with fewer items than page_size, total equals item count.
+    if there are more pages, avoiding expensive COUNT queries on large datasets.
+
+    Returns:
+        tuple: (conversations, total, has_more)
+        - total is exact count only for first page with fewer items than page_size
+        - total is -1 when exact count is unknown (use has_more for pagination)
     """
-    qs = Conversation.objects.filter(user_id=user_id)
+    qs = Conversation.objects.select_related("user").filter(user_id=user_id)
     if not include_archived:
         qs = qs.filter(is_archived=False)
     qs = qs.order_by("-updated_at")
@@ -38,9 +41,9 @@ def get_user_conversations(
     if page == 1 and not has_more:
         total = len(conversations)
     else:
-        total = qs.count()
+        total = -1
 
-    return conversations, total
+    return conversations, total, has_more
 
 
 def get_conversation(conversation_id: UUID, user_id: UUID) -> Conversation:
@@ -51,38 +54,50 @@ def get_conversation(conversation_id: UUID, user_id: UUID) -> Conversation:
         raise NotFoundError("Conversation not found") from e
 
 
-def create_conversation(user_id: UUID, data: ConversationCreateSchema) -> Conversation:
+def create_conversation(
+    user_id: UUID,
+    title: str,
+    model: str,
+    system_prompt: str,
+    temperature: float,
+) -> Conversation:
     """Create a new conversation."""
     return Conversation.objects.create(
         user_id=user_id,
-        title=data.title,
-        model=data.model,
-        system_prompt=data.system_prompt,
-        temperature=data.temperature,
+        title=title,
+        model=model,
+        system_prompt=system_prompt,
+        temperature=temperature,
     )
 
 
 def update_conversation(
-    conversation_id: UUID, user_id: UUID, data: ConversationUpdateSchema
+    conversation_id: UUID,
+    user_id: UUID,
+    title: str | None = None,
+    model: str | None = None,
+    system_prompt: str | None = None,
+    temperature: float | None = None,
+    is_archived: bool | None = None,
 ) -> Conversation:
     """Update a conversation."""
     conversation = get_conversation(conversation_id, user_id)
 
     update_fields = []
-    if data.title is not None:
-        conversation.title = data.title
+    if title is not None:
+        conversation.title = title
         update_fields.append("title")
-    if data.model is not None:
-        conversation.model = data.model
+    if model is not None:
+        conversation.model = model
         update_fields.append("model")
-    if data.system_prompt is not None:
-        conversation.system_prompt = data.system_prompt
+    if system_prompt is not None:
+        conversation.system_prompt = system_prompt
         update_fields.append("system_prompt")
-    if data.temperature is not None:
-        conversation.temperature = data.temperature
+    if temperature is not None:
+        conversation.temperature = temperature
         update_fields.append("temperature")
-    if data.is_archived is not None:
-        conversation.is_archived = data.is_archived
+    if is_archived is not None:
+        conversation.is_archived = is_archived
         update_fields.append("is_archived")
 
     if update_fields:
@@ -98,11 +113,16 @@ def delete_conversation(conversation_id: UUID, user_id: UUID) -> None:
 
 def get_conversation_messages(
     conversation_id: UUID, user_id: UUID, page: int = 1, page_size: int = 50
-) -> tuple[list[Message], int]:
+) -> tuple[list[Message], int, bool]:
     """Get messages for a conversation with pagination.
 
-    Validates ownership via join. Uses optimized single-query approach for
-    first page when possible.
+    Validates ownership via join. Uses optimized single-query approach,
+    avoiding expensive COUNT queries on large datasets.
+
+    Returns:
+        tuple: (messages, total, has_more)
+        - total is exact count only for first page with fewer items than page_size
+        - total is -1 when exact count is unknown (use has_more for pagination)
     """
     if not Conversation.objects.filter(id=conversation_id, user_id=user_id).exists():
         raise NotFoundError("Conversation not found")
@@ -118,9 +138,9 @@ def get_conversation_messages(
     if page == 1 and not has_more:
         total = len(messages)
     else:
-        total = qs.count()
+        total = -1
 
-    return messages, total
+    return messages, total, has_more
 
 
 def create_message(
@@ -162,18 +182,18 @@ def get_conversation_history_with_token_limit(
     reserved_tokens = count_messages_tokens(reserved_messages, model) if reserved_messages else 0
     available_tokens = max_tokens - reserved_tokens
 
-    # Use .values() to reduce ORM overhead
-    messages = (
+    all_messages = list(
         Message.objects.filter(conversation_id=conversation_id)
         .order_by("-created_at")
         .values("role", "content")
     )
 
+    all_msg_dicts = [{"role": msg["role"], "content": msg["content"]} for msg in all_messages]
+
     selected_messages: list[dict] = []
     current_tokens = 0
 
-    for msg in messages:
-        msg_dict = {"role": msg["role"], "content": msg["content"]}
+    for msg_dict in all_msg_dicts:
         msg_tokens = count_messages_tokens([msg_dict], model)
 
         if current_tokens + msg_tokens > available_tokens:

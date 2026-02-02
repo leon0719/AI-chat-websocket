@@ -19,8 +19,8 @@ from apps.chat.services import (
     get_user_conversations,
     update_conversation,
 )
+from apps.core.schemas import ErrorSchema
 from apps.users.auth import JWTAuth
-from apps.users.schemas import ErrorSchema
 
 router = Router(auth=JWTAuth())
 
@@ -29,11 +29,11 @@ router = Router(auth=JWTAuth())
 def list_conversations(
     request,
     include_archived: bool = False,
-    page: int = Query(1, ge=1, le=10000),
+    page: int = Query(1, ge=1, le=1000),
     page_size: int = Query(20, ge=1, le=100),
 ):
     """List all conversations for the current user."""
-    conversations, total = get_user_conversations(
+    conversations, total, has_more = get_user_conversations(
         request.auth.id, include_archived, page, page_size
     )
     return {
@@ -41,13 +41,20 @@ def list_conversations(
         "total": total,
         "page": page,
         "page_size": page_size,
+        "has_more": has_more,
     }
 
 
 @router.post("/", response={201: ConversationSchema, 400: ErrorSchema})
 def create_conversation_api(request, payload: ConversationCreateSchema):
     """Create a new conversation."""
-    conversation = create_conversation(request.auth.id, payload)
+    conversation = create_conversation(
+        user_id=request.auth.id,
+        title=payload.title,
+        model=payload.model,
+        system_prompt=payload.system_prompt,
+        temperature=payload.temperature,
+    )
     return 201, conversation
 
 
@@ -66,7 +73,15 @@ def get_conversation_api(request, conversation_id: UUID):
 )
 def update_conversation_api(request, conversation_id: UUID, payload: ConversationUpdateSchema):
     """Update a conversation."""
-    conversation = update_conversation(conversation_id, request.auth.id, payload)
+    conversation = update_conversation(
+        conversation_id=conversation_id,
+        user_id=request.auth.id,
+        title=payload.title,
+        model=payload.model,
+        system_prompt=payload.system_prompt,
+        temperature=payload.temperature,
+        is_archived=payload.is_archived,
+    )
     return 200, conversation
 
 
@@ -84,14 +99,17 @@ def delete_conversation_api(request, conversation_id: UUID):
 def list_messages(
     request,
     conversation_id: UUID,
-    page: int = Query(1, ge=1, le=10000),
+    page: int = Query(1, ge=1, le=1000),
     page_size: int = Query(50, ge=1, le=100),
 ):
     """List messages for a conversation."""
-    messages, total = get_conversation_messages(conversation_id, request.auth.id, page, page_size)
+    messages, total, has_more = get_conversation_messages(
+        conversation_id, request.auth.id, page, page_size
+    )
     return 200, {
         "messages": list(messages),
         "total": total,
         "page": page,
         "page_size": page_size,
+        "has_more": has_more,
     }

@@ -63,8 +63,8 @@ class ConversationSchema(Schema):
 
     id: UUID
     title: str = Field(max_length=255)
-    model: str = Field(max_length=50)
-    system_prompt: str = Field(max_length=10000)
+    model: str = Field(min_length=1, max_length=50)
+    system_prompt: str = Field(min_length=1, max_length=10000)
     temperature: float = Field(ge=0.0, le=2.0)
     is_archived: bool
     created_at: datetime
@@ -76,7 +76,7 @@ class ConversationListSchema(Schema):
 
     id: UUID
     title: str = Field(max_length=255)
-    model: str = Field(max_length=50)
+    model: str = Field(min_length=1, max_length=50)
     is_archived: bool
     created_at: datetime
     updated_at: datetime
@@ -87,10 +87,10 @@ class MessageSchema(Schema):
 
     id: UUID
     role: MessageRole
-    content: str = Field(max_length=MAX_CONTENT_LENGTH)
+    content: str = Field(min_length=1, max_length=MAX_CONTENT_LENGTH)
     prompt_tokens: int | None = Field(None, ge=0)
     completion_tokens: int | None = Field(None, ge=0)
-    model_used: str = Field(max_length=50)
+    model_used: str = Field(default="", max_length=50)
     created_at: datetime
 
 
@@ -98,15 +98,17 @@ class PaginatedMessagesSchema(Schema):
     """Schema for paginated messages response."""
 
     messages: list[MessageSchema]
-    total: int = Field(ge=0)
+    total: int = Field(ge=-1)
     page: int = Field(ge=1)
     page_size: int = Field(ge=1, le=100)
+    has_more: bool = Field(default=False)
 
 
 class PaginatedConversationsSchema(Schema):
     """Schema for paginated conversations response."""
 
     conversations: list[ConversationListSchema]
-    total: int = Field(ge=0)
+    total: int = Field(ge=-1)
     page: int = Field(ge=1)
     page_size: int = Field(ge=1, le=100)
+    has_more: bool = Field(default=False)

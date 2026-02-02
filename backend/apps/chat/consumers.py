@@ -8,9 +8,18 @@ import nh3
 import orjson
 from channels.db import database_sync_to_async
 from channels.generic.websocket import AsyncWebsocketConsumer
+from django.db import DatabaseError, OperationalError
 
 from apps.chat.ai.client import get_openai_client
 from apps.chat.ai.tokenizer import should_summarize
+from apps.chat.config import (
+    AI_STREAM_TIMEOUT,
+    AUTH_TIMEOUT,
+    HEARTBEAT_INTERVAL,
+    TASK_CANCEL_TIMEOUT,
+    WS_MESSAGE_RATE_LIMIT,
+    WS_RATE_LIMIT_WINDOW,
+)
 from apps.chat.models import MAX_USER_MESSAGE_LENGTH, Conversation, Message, MessageRole
 from apps.chat.services import (
     build_summary_messages,
@@ -19,16 +28,9 @@ from apps.chat.services import (
     get_conversation_history_with_token_limit,
     update_conversation_summary,
 )
-from apps.core.exceptions import AIServiceError, NotFoundError
+from apps.core.exceptions import AIServiceError, InvalidStateError, NotFoundError
 from apps.core.log_config import logger
 from apps.core.ratelimit import check_ws_rate_limit
-
-AI_STREAM_TIMEOUT = 120
-HEARTBEAT_INTERVAL = 30
-TASK_CANCEL_TIMEOUT = 5
-WS_MESSAGE_RATE_LIMIT = 20
-WS_RATE_LIMIT_WINDOW = 60
-AUTH_TIMEOUT = 30
 
 
 class WSMessageType(StrEnum):
@@ -189,8 +191,10 @@ class ChatConsumer(AsyncWebsocketConsumer):
                 await self.send(text_data=orjson.dumps({"type": WSMessageType.PING}).decode())
         except asyncio.CancelledError:
             pass
-        except Exception as e:
-            logger.warning(f"Heartbeat error for conversation={self.conversation_id}: {e}")
+        except (ConnectionError, OSError) as e:
+            logger.warning(
+                f"Heartbeat connection error for conversation={self.conversation_id}: {e}"
+            )
 
     async def receive(self, text_data):
         """Handle incoming WebSocket messages."""
@@ -270,9 +274,15 @@ class ChatConsumer(AsyncWebsocketConsumer):
         except AIServiceError as e:
             logger.error(f"AI service error: {e}")
             await self._send_error(str(e), WSErrorCode.AI_ERROR)
-        except Exception as e:
-            logger.exception(f"Unexpected error during chat: {e}")
-            await self._send_error("An unexpected error occurred", WSErrorCode.INTERNAL_ERROR)
+        except (DatabaseError, OperationalError) as e:
+            logger.error(f"Database error during chat: {e}")
+            await self._send_error("Database error occurred", WSErrorCode.INTERNAL_ERROR)
+        except (ConnectionError, OSError) as e:
+            logger.error(f"Connection error during chat: {e}")
+            await self._send_error("Connection error occurred", WSErrorCode.INTERNAL_ERROR)
+        except InvalidStateError as e:
+            logger.error(f"Invalid state during chat: {e}")
+            await self._send_error("Invalid conversation state", WSErrorCode.INTERNAL_ERROR)
 
     async def _validate_message_content(self, data: dict) -> str | None:
         """Validate and sanitize message content. Returns None if invalid."""
@@ -296,7 +306,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
     def _build_chat_messages(self, history: list[dict]) -> list[dict]:
         """Build the message list for AI API call."""
         if self.conversation is None:
-            raise RuntimeError("Conversation required for building messages")
+            raise InvalidStateError("Conversation required for building messages")
         messages = [{"role": "system", "content": self.conversation.system_prompt}]
 
         if self.conversation.summary:
@@ -313,7 +323,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
     async def _stream_ai_response(self, messages: list[dict]) -> tuple[str, dict]:
         """Stream AI response and return full response with usage stats."""
         if self.conversation is None:
-            raise RuntimeError("Conversation required for streaming AI response")
+            raise InvalidStateError("Conversation required for streaming AI response")
         full_response = ""
         usage = {"prompt_tokens": 0, "completion_tokens": 0}
 
@@ -342,7 +352,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
     ) -> None:
         """Save assistant message and trigger summary if needed."""
         if self.conversation is None or self.conversation_id is None:
-            raise RuntimeError("Conversation required for saving response")
+            raise InvalidStateError("Conversation required for saving response")
         assistant_message = await self._save_message(
             conversation_id=self.conversation_id,
             role=MessageRole.ASSISTANT,
@@ -418,7 +428,7 @@ class ChatConsumer(AsyncWebsocketConsumer):
     def _get_history_with_token_limit(self) -> tuple[list[dict], int]:
         """Get conversation history with token limit."""
         if self.conversation_id is None or self.conversation is None:
-            raise RuntimeError("Conversation required for getting history")
+            raise InvalidStateError("Conversation required for getting history")
         return get_conversation_history_with_token_limit(
             conversation_id=self.conversation_id,
             model=self.conversation.model,
@@ -459,5 +469,5 @@ class ChatConsumer(AsyncWebsocketConsumer):
                     f"Generated summary for conversation {self.conversation_id}, "
                     f"token_count={token_count}"
                 )
-        except Exception as e:
-            logger.error(f"Failed to generate summary: {e}")
+        except AIServiceError as e:
+            logger.error(f"AI service error during summary generation: {e}")

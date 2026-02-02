@@ -1,7 +1,9 @@
 """Production settings."""
 
 from config.settings.base import *  # noqa: F403
-from config.settings.base import settings
+from config.settings.base import MIDDLEWARE, settings
+
+MIDDLEWARE = ["apps.core.middleware.ContentSecurityPolicyMiddleware", *MIDDLEWARE]
 
 DEBUG = False
 
@@ -22,10 +24,16 @@ SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
 # Prevent clickjacking
 X_FRAME_OPTIONS = "DENY"
 
+# Content Security Policy for API responses
+SECURE_CONTENT_TYPE_NOSNIFF = True
+CSP_DEFAULT_SRC = ("'none'",)
+CSP_FRAME_ANCESTORS = ("'none'",)
+
 SESSION_COOKIE_SECURE = True
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 CSRF_COOKIE_SECURE = True
+CSRF_COOKIE_HTTPONLY = True
 CSRF_COOKIE_SAMESITE = "Lax"
 
 # CSRF trusted origins (same as CORS origins)

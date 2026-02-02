@@ -4,6 +4,7 @@ import pytest
 from django.core.cache import cache
 
 from apps.users.services import blacklist_token, is_token_blacklisted
+from tests.conftest import TEST_EMAIL, TEST_PASSWORD
 
 
 @pytest.fixture(autouse=True)
@@ -50,8 +51,8 @@ class TestAuthEndpoints:
         response = api_client.post(
             "/token/pair",
             json={
-                "email": "test@example.com",
-                "password": "testpassword123",
+                "email": TEST_EMAIL,
+                "password": TEST_PASSWORD,
             },
         )
         assert response.status_code == 200, (
@@ -90,8 +91,8 @@ class TestAuthEndpoints:
         login_response = api_client.post(
             "/token/pair",
             json={
-                "email": "test@example.com",
-                "password": "testpassword123",
+                "email": TEST_EMAIL,
+                "password": TEST_PASSWORD,
             },
         )
         assert login_response.status_code == 200

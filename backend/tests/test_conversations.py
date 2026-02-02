@@ -16,6 +16,7 @@ class TestConversationEndpoints:
         data = response.json()
         assert data["conversations"] == []
         assert data["total"] == 0
+        assert data["has_more"] is False
 
     def test_create_conversation(self, authenticated_client):
         """Test creating a new conversation."""
@@ -49,6 +50,7 @@ class TestConversationEndpoints:
         data = response.json()
         assert len(data["conversations"]) == 2
         assert data["total"] == 2
+        assert data["has_more"] is False
 
     def test_get_conversation(self, authenticated_client, user):
         """Test getting a specific conversation."""

@@ -2,7 +2,28 @@
 
 import uuid
 
+from django.conf import settings
+
 from apps.core.log_config import request_id_var, user_id_var
+
+
+class ContentSecurityPolicyMiddleware:
+    """Middleware to add Content-Security-Policy header for API responses.
+
+    Enforces strict CSP for API-only applications to prevent XSS attacks
+    on any accidental HTML responses.
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        response = self.get_response(request)
+
+        if not settings.DEBUG:
+            response["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+
+        return response
 
 
 class RequestContextMiddleware:

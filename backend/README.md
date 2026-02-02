@@ -9,7 +9,7 @@
 - **資料庫**: PostgreSQL 16 (psycopg 3.x)
 - **快取**: Redis 7
 - **AI**: OpenAI API (streaming)
-- **認證**: JWT (python-jose)
+- **認證**: JWT (ninja-jwt)
 - **ASGI**: uvicorn + daphne
 
 ## 快速開始
@@ -82,7 +82,7 @@ cp .env.prod.example .env.prod
 | `REDIS_URL` | Redis 連線字串 | - |
 | `OPENAI_API_KEY` | OpenAI API 金鑰 | - |
 | `JWT_SECRET_KEY` | JWT 簽名金鑰 | - |
-| `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | Access Token 有效期（分鐘） | `30` |
+| `JWT_ACCESS_TOKEN_EXPIRE_MINUTES` | Access Token 有效期（分鐘） | `15` |
 | `JWT_REFRESH_TOKEN_EXPIRE_DAYS` | Refresh Token 有效期（天） | `7` |
 | `CORS_ALLOWED_ORIGINS` | CORS 允許的來源（逗號分隔） | `http://localhost:3000` |
 
@@ -99,24 +99,51 @@ cp .env.prod.example .env.prod
 | 方法 | 路徑 | 說明 |
 |------|------|------|
 | POST | `/register` | 註冊新使用者 |
-| POST | `/login` | 登入取得 JWT |
-| POST | `/refresh` | 刷新 Token |
+| POST | `/logout` | 登出（將 token 加入黑名單） |
 | GET | `/me` | 取得當前使用者資訊 |
+
+### Token `/api/token/`
+
+| 方法 | 路徑 | 說明 |
+|------|------|------|
+| POST | `/pair` | 登入取得 JWT（access + refresh） |
+| POST | `/refresh` | 刷新 Access Token |
 
 ### 對話 `/api/conversations/`
 
 | 方法 | 路徑 | 說明 |
 |------|------|------|
-| GET | `/` | 列出所有對話 |
+| GET | `/` | 列出所有對話（支援分頁） |
 | POST | `/` | 建立新對話 |
 | GET | `/{id}` | 取得對話詳情 |
 | PATCH | `/{id}` | 更新對話 |
 | DELETE | `/{id}` | 刪除對話 |
-| GET | `/{id}/messages` | 取得訊息列表 |
+| GET | `/{id}/messages` | 取得訊息列表（支援分頁） |
 
 ### WebSocket
 
-**端點**: `ws://localhost:8000/ws/chat/{conversation_id}/?token=<jwt_token>`
+**端點**: `ws://localhost:8000/ws/chat/{conversation_id}/`
+
+WebSocket 使用 **In-Band 認證**，連線後透過訊息發送 token，避免 token 出現在 URL 或日誌中。
+
+#### 認證流程
+
+**1. 連線**（不帶 token）:
+```
+ws://localhost:8000/ws/chat/{conversation_id}/
+```
+
+**2. 發送認證訊息**（30 秒內）:
+```json
+{"type": "auth", "token": "<jwt_access_token>"}
+```
+
+**3. 認證成功回應**:
+```json
+{"type": "auth.success", "conversation_id": "uuid"}
+```
+
+#### 聊天訊息
 
 **發送訊息**:
 ```json
@@ -130,10 +157,55 @@ cp .env.prod.example .env.prod
 {"type": "chat.stream", "content": "", "done": true, "message_id": "uuid"}
 ```
 
-**錯誤訊息**:
+#### 心跳機制
+
+伺服器每 30 秒發送 ping，客戶端應回應 pong：
+```json
+// 伺服器 → 客戶端
+{"type": "ping"}
+
+// 客戶端 → 伺服器
+{"type": "pong"}
+```
+
+#### 錯誤訊息
+
 ```json
 {"type": "chat.error", "error": "錯誤訊息", "code": "ERROR_CODE"}
 ```
+
+| 錯誤代碼 | 說明 |
+|----------|------|
+| `INVALID_JSON` | JSON 格式錯誤 |
+| `UNKNOWN_TYPE` | 未知的訊息類型 |
+| `AUTH_REQUIRED` | 需要先完成認證 |
+| `AUTH_FAILED` | 認證失敗（token 無效或過期） |
+| `AUTH_TIMEOUT` | 認證超時（30 秒內未完成認證） |
+| `NO_CONVERSATION` | 對話不存在或無權存取 |
+| `RATE_LIMIT_EXCEEDED` | 超過速率限制（20 條/60 秒） |
+| `ALREADY_PROCESSING` | 正在處理上一條訊息 |
+| `EMPTY_CONTENT` | 訊息內容為空 |
+| `MESSAGE_TOO_LONG` | 訊息超過長度限制 |
+| `AI_TIMEOUT` | AI 回應超時 |
+| `AI_ERROR` | AI 服務錯誤 |
+| `INTERNAL_ERROR` | 內部錯誤 |
+
+## 安全功能
+
+- **密碼複雜度**：至少 12 字元，須包含大小寫字母、數字、特殊字元
+- **登入保護**：5 次失敗後鎖定 15 分鐘（django-axes）
+- **Token 黑名單**：登出時 token 加入黑名單，使用 Redis TTL 自動清理
+- **WebSocket 安全**：
+  - In-Band 認證（token 不在 URL 中）
+  - 30 秒認證超時
+  - 訊息速率限制（20 條/60 秒）
+  - 訊息內容清理（XSS 防護）
+  - Origin 驗證（生產環境）
+- **生產環境安全設定**：
+  - HTTPS 強制重導向
+  - HSTS（1 年）
+  - Secure Cookie
+  - CSP Header
 
 ## 常用指令
 
@@ -196,19 +268,26 @@ backend/
 │   │   ├── api.py              # Health Check API
 │   │   ├── exceptions.py       # 自訂例外
 │   │   ├── log_config.py       # Loguru 設定
-│   │   └── middleware.py       # 中介層
+│   │   ├── middleware.py       # 中介層
+│   │   ├── ratelimit.py        # WebSocket 速率限制
+│   │   └── schemas.py          # 共用 Schema
 │   │
 │   ├── users/                  # 使用者管理
 │   │   ├── models.py           # User 模型
 │   │   ├── auth.py             # JWT 認證
+│   │   ├── services.py         # 業務邏輯
 │   │   └── api.py              # 認證 API
 │   │
 │   └── chat/                   # 聊天功能
 │       ├── models.py           # Conversation, Message
 │       ├── consumers.py        # WebSocket Consumer
+│       ├── middleware.py       # WebSocket 認證中介層
+│       ├── config.py           # 設定常數
+│       ├── services.py         # 業務邏輯
 │       ├── api.py              # REST API
 │       └── ai/
-│           └── client.py       # OpenAI 封裝
+│           ├── client.py       # OpenAI 封裝
+│           └── tokenizer.py    # Token 計算
 │
 ├── docker/
 │   ├── docker-compose.dev.yml  # 開發環境 (含 PostgreSQL, Redis)
@@ -217,10 +296,17 @@ backend/
 │   └── Dockerfile.dev          # 開發映像
 │
 ├── tests/                      # 測試檔案
+│   ├── conftest.py             # Pytest fixtures
+│   ├── test_auth.py            # 認證測試
+│   ├── test_conversations.py   # 對話測試
+│   ├── test_websocket.py       # WebSocket 測試
+│   └── test_ratelimit.py       # 速率限制測試
 │
 ├── .dockerignore               # Docker 忽略檔案
 ├── .env.local.example          # 本地開發環境變數範例
-└── .env.prod.example           # 生產環境變數範例
+├── .env.prod.example           # 生產環境變數範例
+├── CLAUDE.md                   # Claude Code 開發指南
+└── README.md                   # 本文件
 ```
 
 ## 測試
@@ -230,7 +316,10 @@ backend/
 make test
 
 # 執行特定測試
-docker compose -f docker/docker-compose.dev.yml exec api uv run pytest tests/test_auth.py -v
+docker compose -f docker/docker-compose.dev.yml exec api pytest tests/test_auth.py -v
+
+# 執行單一測試
+docker compose -f docker/docker-compose.dev.yml exec api pytest tests/test_auth.py::TestAuthEndpoints::test_login_success -v
 ```
 
 ## CI/CD

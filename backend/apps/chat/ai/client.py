@@ -43,9 +43,6 @@ async def handle_openai_errors():
     except OpenAIError as e:
         logger.error(f"OpenAI API error: {e}")
         raise AIServiceError(f"OpenAI API error: {e}") from e
-    except Exception as e:
-        logger.exception(f"Unexpected error calling OpenAI: {e}")
-        raise AIServiceError(f"Unexpected error: {e}") from e
 
 
 class OpenAIClient:

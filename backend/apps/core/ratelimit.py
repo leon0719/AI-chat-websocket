@@ -4,12 +4,18 @@ HTTP endpoints use Django Ninja's built-in throttling (see config/urls.py).
 This module provides rate limiting for WebSocket connections only.
 """
 
+import threading
 import time
+from functools import lru_cache
 
+import redis
 from django.conf import settings
 from django.core.cache import cache
 
 from apps.core.log_config import logger
+
+_fallback_lock = threading.Lock()
+_redis_client: redis.Redis | None = None
 
 
 def _is_fail_closed() -> bool:
@@ -22,11 +28,44 @@ def _get_rate_limit_key(identifier: str, action: str) -> str:
     return f"ws_ratelimit:{action}:{identifier}"
 
 
-def _get_redis_client():
-    """Get Redis client, returns None if not available."""
+@lru_cache(maxsize=1)
+def _get_redis_url() -> str | None:
+    """Get Redis URL from Django settings."""
+    # Try to get from cache backend config
+    cache_config = getattr(settings, "CACHES", {}).get("default", {})
+    location = cache_config.get("LOCATION")
+    if location:
+        return location
+
+    # Fallback to REDIS_URL setting
+    return getattr(settings, "REDIS_URL", None)
+
+
+def _get_redis_client() -> redis.Redis | None:
+    """Get Redis client for rate limiting.
+
+    Creates a direct Redis connection using the URL from settings.
+    This is more reliable than accessing Django cache internals.
+    """
+    global _redis_client
+
+    if _redis_client is not None:
+        try:
+            _redis_client.ping()
+            return _redis_client
+        except Exception:
+            _redis_client = None
+
+    redis_url = _get_redis_url()
+    if not redis_url:
+        return None
+
     try:
-        return cache.client.get_client()  # type: ignore[attr-defined]
-    except AttributeError:
+        _redis_client = redis.from_url(redis_url, decode_responses=True)
+        _redis_client.ping()
+        return _redis_client
+    except Exception as e:
+        logger.warning(f"Failed to connect to Redis for rate limiting: {e}")
         return None
 
 
@@ -54,7 +93,7 @@ def check_ws_rate_limit(
 
 
 def _redis_rate_limit(
-    redis_client,
+    redis_client: redis.Redis,
     key: str,
     max_requests: int,
     window_seconds: int,
@@ -103,6 +142,8 @@ def _fallback_rate_limit(
 
     When RATELIMIT_FAIL_CLOSED is True (default), deny requests for security.
     This prevents attackers from bypassing rate limits by causing Redis failures.
+
+    Uses threading.Lock for thread-safety in non-Redis environments.
     """
     if _is_fail_closed():
         logger.critical(
@@ -110,20 +151,22 @@ def _fallback_rate_limit(
         )
         return False, 60
 
-    # Non-Redis cache backend (e.g., in tests with LocMemCache)
-    window_start = now - window_seconds
+    with _fallback_lock:
+        window_start = now - window_seconds
 
-    data = cache.get(key, {"timestamps": []})
-    timestamps = data.get("timestamps", [])
-    timestamps = [ts for ts in timestamps if ts > window_start]
+        data = cache.get(key, {"timestamps": []})
+        timestamps = data.get("timestamps", [])
+        timestamps = [ts for ts in timestamps if ts > window_start]
 
-    if len(timestamps) >= max_requests:
-        oldest_timestamp = min(timestamps) if timestamps else now
-        retry_after = int(oldest_timestamp + window_seconds - now) + 1
-        logger.warning(f"WebSocket rate limit exceeded: action={action}, identifier={identifier}")
-        return False, max(retry_after, 1)
+        if len(timestamps) >= max_requests:
+            oldest_timestamp = min(timestamps) if timestamps else now
+            retry_after = int(oldest_timestamp + window_seconds - now) + 1
+            logger.warning(
+                f"WebSocket rate limit exceeded: action={action}, identifier={identifier}"
+            )
+            return False, max(retry_after, 1)
 
-    timestamps.append(now)
-    cache.set(key, {"timestamps": timestamps}, timeout=window_seconds + 60)
+        timestamps.append(now)
+        cache.set(key, {"timestamps": timestamps}, timeout=window_seconds + 60)
 
-    return True, 0
+        return True, 0
