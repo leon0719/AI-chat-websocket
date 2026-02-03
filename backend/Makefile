@@ -43,7 +43,7 @@ help:
 	@echo "  make format            - 格式化程式碼"
 	@echo "  make lint              - 執行 ruff 檢查"
 	@echo "  make type-check        - 執行 mypy 型別檢查"
-	@echo "  make test              - 執行測試"
+	@echo "  make test              - 執行測試 (可用 TEST=\"path\" 指定測試)"
 	@echo "  make unused            - 檢查未使用的函式"
 	@echo ""
 	@echo "其他:"
@@ -160,7 +160,7 @@ type-check:
 
 test:
 	@echo "Running tests..."
-	@$(COMPOSE_DEV) exec api uv run pytest
+	@$(COMPOSE_DEV) exec api uv run pytest $(TEST)
 
 unused:
 	@echo "Checking for unused functions..."
