@@ -18,6 +18,14 @@ jobs:
   code-quality:
     name: Code Quality
     runs-on: ubuntu-latest
+    env:
+      # Required for mypy-django-plugin to load Django settings
+      ENV: local
+      SECRET_KEY: dummy-secret-key-for-type-check
+      DATABASE_URL: postgres://localhost/dummy
+      REDIS_URL: redis://localhost:6379/0
+      OPENAI_API_KEY: sk-dummy-key-for-type-check
+      JWT_SECRET_KEY: dummy-jwt-secret-for-type-check
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
