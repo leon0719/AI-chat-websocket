@@ -1,15 +1,14 @@
 """User models."""
 
-import uuid
-
 from django.contrib.auth.models import AbstractUser
 from django.db import models
+from uuid6 import uuid7
 
 
 class User(AbstractUser):
     """Custom user model with UUID primary key."""
 
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.UUIDField(primary_key=True, default=uuid7, editable=False)
     email = models.EmailField(unique=True)
 
     # Use email as the username field

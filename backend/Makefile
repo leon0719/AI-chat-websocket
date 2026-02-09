@@ -1,4 +1,4 @@
-.PHONY: all format lint lint-fix type-check check test clean unused help
+.PHONY: all format lint lint-fix type-check check test coverage clean unused help
 .PHONY: install up down logs build rebuild
 .PHONY: migrate makemigrations shell createsuperuser
 .PHONY: docker-clean logs-api logs-db
@@ -44,6 +44,7 @@ help:
 	@echo "  make lint              - 執行 ruff 檢查"
 	@echo "  make type-check        - 執行 mypy 型別檢查"
 	@echo "  make test              - 執行測試 (可用 TEST=\"path\" 指定測試)"
+	@echo "  make coverage          - 執行測試並產生覆蓋率報告"
 	@echo "  make unused            - 檢查未使用的函式"
 	@echo ""
 	@echo "其他:"
@@ -162,6 +163,12 @@ test:
 	@echo "Running tests..."
 	@$(COMPOSE_DEV) exec api uv run pytest $(TEST)
 
+coverage:
+	@echo "Running tests with coverage..."
+	@$(COMPOSE_DEV) exec api uv run pytest --cov=apps --cov-report=term-missing --cov-report=html $(TEST)
+	@echo ""
+	@echo "HTML 報告已產生至 htmlcov/ 目錄"
+
 unused:
 	@echo "Checking for unused functions..."
 	@uv run python scripts/check_unused_functions.py
@@ -177,4 +184,5 @@ clean:
 	@find . -type d -name ".mypy_cache" -exec rm -rf {} + 2>/dev/null || true
 	@find . -type d -name ".ruff_cache" -exec rm -rf {} + 2>/dev/null || true
 	@find . -type f -name "*.pyc" -delete 2>/dev/null || true
+	@rm -rf htmlcov .coverage 2>/dev/null || true
 	@echo "Cache cleaned!"

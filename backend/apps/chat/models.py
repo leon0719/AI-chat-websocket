@@ -1,10 +1,9 @@
 """Chat models."""
 
-import uuid
-
 from django.conf import settings
 from django.core.validators import MaxLengthValidator, MaxValueValidator, MinValueValidator
 from django.db import models
+from uuid6 import uuid7
 
 # Supported models
 SUPPORTED_MODELS = ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"]
@@ -27,7 +26,7 @@ class MessageRole(models.TextChoices):
 class Conversation(models.Model):
     """Conversation model."""
 
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.UUIDField(primary_key=True, default=uuid7, editable=False)
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.CASCADE,
@@ -77,7 +76,7 @@ class Conversation(models.Model):
 class Message(models.Model):
     """Message model."""
 
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    id = models.UUIDField(primary_key=True, default=uuid7, editable=False)
     conversation = models.ForeignKey(
         Conversation,
         on_delete=models.CASCADE,

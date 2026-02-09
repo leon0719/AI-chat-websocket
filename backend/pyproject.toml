@@ -35,6 +35,8 @@ dependencies = [
     "loguru>=0.7.3",
     "tenacity>=9.1.2",
     "django-ninja-jwt>=5.4.4",
+    # UUID
+    "uuid6>=2025.0.1",
 ]
 
 [dependency-groups]

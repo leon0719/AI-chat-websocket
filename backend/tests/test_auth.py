@@ -2,6 +2,7 @@
 
 import pytest
 from django.core.cache import cache
+from django.test import Client
 
 from apps.users.services import blacklist_token, is_token_blacklisted
 from tests.conftest import TEST_EMAIL, TEST_PASSWORD
@@ -202,3 +203,106 @@ class TestTokenBlacklist:
         # Token should now be rejected
         response = api_client.get("/auth/me")
         assert response.status_code == 401
+
+
+@pytest.mark.django_db
+class TestTokenRefreshEdgeCases:
+    """Test token refresh endpoint edge cases."""
+
+    def test_refresh_no_cookie(self, user):
+        """Test refresh with no refresh token cookie."""
+        client = Client()
+        response = client.post("/api/auth/token/refresh")
+        assert response.status_code == 401
+
+    def test_refresh_invalid_token(self, user):
+        """Test refresh with invalid token in cookie."""
+        client = Client()
+        client.cookies["refresh_token"] = "invalid.token.here"
+        response = client.post("/api/auth/token/refresh")
+        assert response.status_code == 401
+
+    def test_refresh_with_access_token_type(self, user):
+        """Test refresh rejects access token (wrong type)."""
+        from ninja_jwt.tokens import AccessToken
+
+        access_token = AccessToken.for_user(user)
+        client = Client()
+        client.cookies["refresh_token"] = str(access_token)
+        response = client.post("/api/auth/token/refresh")
+        assert response.status_code == 401
+
+    def test_refresh_blacklisted_token(self, user):
+        """Test refresh rejects blacklisted refresh token."""
+        from ninja_jwt.tokens import RefreshToken
+
+        refresh = RefreshToken.for_user(user)
+        refresh_str = str(refresh)
+
+        blacklist_token(refresh_str)
+
+        client = Client()
+        client.cookies["refresh_token"] = refresh_str
+        response = client.post("/api/auth/token/refresh")
+        assert response.status_code == 401
+
+
+@pytest.mark.django_db
+class TestLogoutEdgeCases:
+    """Test logout endpoint edge cases."""
+
+    def test_logout_with_cookie_refresh_token(self, user):
+        """Test that logout blacklists refresh token from cookie."""
+        from ninja_jwt.tokens import AccessToken, RefreshToken
+
+        access = AccessToken.for_user(user)
+        refresh = RefreshToken.for_user(user)
+        refresh_str = str(refresh)
+
+        client = Client()
+        client.cookies["refresh_token"] = refresh_str
+        response = client.post(
+            "/api/auth/logout",
+            content_type="application/json",
+            HTTP_AUTHORIZATION=f"Bearer {access!s}",
+        )
+        assert response.status_code == 200
+
+    def test_logout_with_body_refresh_token(self, api_client, user):
+        """Test that logout blacklists refresh token from body."""
+        from ninja_jwt.tokens import AccessToken, RefreshToken
+
+        access = AccessToken.for_user(user)
+        refresh = RefreshToken.for_user(user)
+
+        api_client.headers = {"Authorization": f"Bearer {access!s}"}
+        response = api_client.post(
+            "/auth/logout",
+            json={"refresh_token": str(refresh)},
+        )
+        assert response.status_code == 200
+
+
+@pytest.mark.django_db
+class TestBlacklistTokenEdgeCases:
+    """Test blacklist_token edge cases."""
+
+    def test_blacklist_invalid_token(self):
+        """Test blacklisting an invalid token does not raise."""
+        blacklist_token("not.a.valid.jwt.token")
+
+    def test_blacklist_token_no_jti(self):
+        """Test blacklisting a token without jti claim."""
+        import time
+
+        import jwt
+        from django.conf import settings
+
+        from config.settings.base import settings as app_settings
+
+        token = jwt.encode(
+            {"user_id": "123", "exp": time.time() + 3600},
+            str(settings.NINJA_JWT["SIGNING_KEY"]),
+            algorithm=app_settings.JWT_ALGORITHM,
+        )
+        blacklist_token(token)

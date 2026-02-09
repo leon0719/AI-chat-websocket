@@ -10,7 +10,7 @@ from apps.core.log_config import logger
 router = Router()
 
 
-@router.get("/health/")
+@router.get("/health/", response={200: dict, 503: dict})
 def health_check(request):
     """Health check endpoint for load balancers and container orchestration."""
     health = {

@@ -126,3 +126,28 @@ class TestFallbackRateLimit:
             )
             assert is_allowed is True
             assert retry_after == 0
+
+    def test_fail_open_blocks_over_limit(self):
+        """Test that fail-open fallback blocks when over limit."""
+        with patch("apps.core.ratelimit._is_fail_closed", return_value=False):
+            now = 1000.0
+            for i in range(3):
+                _fallback_rate_limit(
+                    key="test-key-overlimit",
+                    max_requests=3,
+                    window_seconds=60,
+                    now=now + i * 0.1,
+                    identifier="test-user",
+                    action="test-action",
+                )
+
+            is_allowed, retry_after = _fallback_rate_limit(
+                key="test-key-overlimit",
+                max_requests=3,
+                window_seconds=60,
+                now=now + 1.0,
+                identifier="test-user",
+                action="test-action",
+            )
+            assert is_allowed is False
+            assert retry_after > 0
