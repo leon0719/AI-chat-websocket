@@ -49,7 +49,7 @@ class TestRequestContextMiddleware:
 
     def _make_middleware(self):
         response = MagicMock()
-        response_headers = {}
+        response_headers: dict[str, str] = {}
         response.__setitem__ = lambda self, k, v: response_headers.__setitem__(k, v)
         response.__getitem__ = lambda self, k: response_headers[k]
 

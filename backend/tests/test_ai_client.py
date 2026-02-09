@@ -84,7 +84,7 @@ class TestOpenAIClientStreamChat:
             yield content_chunk
             yield usage_chunk
 
-        client._call_openai = AsyncMock(return_value=mock_stream())
+        client._call_openai = AsyncMock(return_value=mock_stream())  # type: ignore[method-assign]
 
         results = []
         async for chunk in client.stream_chat(messages=[{"role": "user", "content": "Hi"}]):
@@ -107,7 +107,7 @@ class TestOpenAIClientStreamChat:
         async def mock_stream():
             yield chunk
 
-        client._call_openai = AsyncMock(return_value=mock_stream())
+        client._call_openai = AsyncMock(return_value=mock_stream())  # type: ignore[method-assign]
 
         results = []
         async for item in client.stream_chat(messages=[{"role": "user", "content": "Hi"}]):
@@ -130,7 +130,7 @@ class TestOpenAIClientChat:
         mock_response.choices[0].message.content = "Hello there!"
         mock_response.usage = MagicMock(prompt_tokens=5, completion_tokens=3)
 
-        client._call_openai = AsyncMock(return_value=mock_response)
+        client._call_openai = AsyncMock(return_value=mock_response)  # type: ignore[method-assign]
 
         result = await client.chat(messages=[{"role": "user", "content": "Hi"}])
         assert result["content"] == "Hello there!"
@@ -147,7 +147,7 @@ class TestOpenAIClientChat:
         mock_response.choices = []
         mock_response.usage = None
 
-        client._call_openai = AsyncMock(return_value=mock_response)
+        client._call_openai = AsyncMock(return_value=mock_response)  # type: ignore[method-assign]
 
         result = await client.chat(messages=[{"role": "user", "content": "Hi"}])
         assert result["content"] == ""
