@@ -28,4 +28,10 @@ export const queryKeys = {
     all: ["messages"] as const,
     list: (conversationId: string) => ["messages", "list", conversationId] as const,
   },
+  payments: {
+    all: ["payments"] as const,
+    packages: ["payments", "packages"] as const,
+    balance: ["payments", "balance"] as const,
+    orders: (params?: { pageSize?: number }) => ["payments", "orders", params] as const,
+  },
 } as const;

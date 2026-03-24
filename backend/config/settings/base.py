@@ -40,6 +40,14 @@ class Settings(BaseSettings):
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 7
 
+    # ECPay payment integration (test defaults)
+    ECPAY_MERCHANT_ID: str = "3002607"
+    ECPAY_HASH_KEY: str = "pwFHCqoQZGmho4w6"
+    ECPAY_HASH_IV: str = "EkRm7iFT261dpevs"
+    ECPAY_PAYMENT_URL: str = "https://payment-stage.ecpay.com.tw/Cashier/AioCheckOut/V5"
+    ECPAY_RETURN_URL: str = ""
+    ECPAY_CLIENT_BACK_URL: str = ""
+
     def _parse_comma_separated(self, value: str) -> list[str]:
         """Parse comma-separated string into list, stripping whitespace."""
         return [v.strip() for v in value.split(",") if v.strip()]
@@ -85,6 +93,7 @@ INSTALLED_APPS = [
     "apps.core",
     "apps.users",
     "apps.chat",
+    "apps.payments",
 ]
 
 MIDDLEWARE = [

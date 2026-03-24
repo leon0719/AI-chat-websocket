@@ -1,6 +1,6 @@
 import { createBrowserRouter, Navigate } from "react-router";
 import { AuthLayout, ChatLayout, RootLayout } from "@/components/layout";
-import { ChatPage, LoginPage, RegisterPage } from "@/pages";
+import { ChatPage, LoginPage, RegisterPage, TopUpPage } from "@/pages";
 
 export const router = createBrowserRouter([
   {
@@ -25,6 +25,10 @@ export const router = createBrowserRouter([
           {
             path: "/chat",
             element: <ChatPage />,
+          },
+          {
+            path: "/top-up",
+            element: <TopUpPage />,
           },
         ],
       },

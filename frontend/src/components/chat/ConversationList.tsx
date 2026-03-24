@@ -1,6 +1,8 @@
-import { LogOut, MessageSquareOff, Plus } from "lucide-react";
+import { Coins, LogOut, MessageSquareOff, Plus } from "lucide-react";
+import { useNavigate } from "react-router";
 import { useShallow } from "zustand/react/shallow";
 import { EmptyState, LoadingSpinner } from "@/components/common";
+import { CreditBalance } from "@/components/payment";
 import { Button, ScrollArea, Separator } from "@/components/ui";
 import {
   useConversations,
@@ -25,6 +27,7 @@ export function ConversationList() {
   const deleteConversation = useDeleteConversation();
   const updateConversation = useUpdateConversation();
   const logout = useLogout();
+  const navigate = useNavigate();
 
   const conversations = data?.pages.flatMap((page) => page.conversations) ?? [];
 
@@ -126,7 +129,17 @@ export function ConversationList() {
 
       <Separator />
 
-      <div className="p-4">
+      <div className="space-y-2 p-4">
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full justify-start"
+          onClick={() => navigate("/top-up")}
+        >
+          <Coins className="mr-2 h-4 w-4" />
+          <CreditBalance />
+        </Button>
+
         <div className="flex items-center justify-between">
           <div className="truncate">
             <p className="text-sm font-medium truncate">{user?.username}</p>

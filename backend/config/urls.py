@@ -19,6 +19,8 @@ from apps.core.exceptions import (
     ValidationError,
 )
 from apps.core.log_config import logger
+from apps.payments.api import router as payments_router
+from apps.payments.views import ecpay_notify_view
 from apps.users.api import router as users_router
 
 api = NinjaExtraAPI(
@@ -88,8 +90,11 @@ api.add_router("", core_router, tags=["health"])
 # Auth endpoints include custom JWT token/pair and token/refresh with HttpOnly cookie support
 api.add_router("/auth", users_router, tags=["auth"])
 api.add_router("/conversations", chat_router, tags=["conversations"])
+api.add_router("/payments", payments_router, tags=["payments"])
 
 urlpatterns = [
+    # ECPay callback (CSRF-exempt, before api.urls)
+    path("api/payments/ecpay/notify", ecpay_notify_view),
     path("admin/", admin.site.urls),
     path("api/", api.urls),
     *static(settings.STATIC_URL, document_root=settings.STATIC_ROOT),
